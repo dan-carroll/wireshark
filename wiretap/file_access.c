@@ -51,6 +51,7 @@
 #include "k12.h"
 #include "ber.h"
 #include "catapult_dct2000.h"
+#include "mp4.h"
 #include "mp2t.h"
 #include "mpeg.h"
 #include "netscreen.h"
@@ -78,6 +79,7 @@
 #include "systemd_journal.h"
 #include "log3gpp.h"
 #include "candump.h"
+#include "busmaster.h"
 
 
 /*
@@ -151,6 +153,7 @@ static const struct file_extension_info file_type_extensions_base[] = {
 	{ "Transport-Neutral Encapsulation Format", FALSE, "tnef" },
 	{ "JPEG/JFIF files", FALSE, "jpg;jpeg;jfif" },
 	{ "JavaScript Object Notation file", FALSE, "json" },
+	{ "MP4 file", FALSE, "mp4" },
 };
 
 #define	N_FILE_TYPE_EXTENSIONS	(sizeof file_type_extensions_base / sizeof file_type_extensions_base[0])
@@ -418,6 +421,7 @@ static const struct open_info open_info_base[] = {
 	{ "Android Logcat Binary format",           OPEN_INFO_HEURISTIC, logcat_open,              "logcat",   NULL, NULL },
 	{ "Android Logcat Text formats",            OPEN_INFO_HEURISTIC, logcat_text_open,         "txt",      NULL, NULL },
 	{ "Candump log",                            OPEN_INFO_HEURISTIC, candump_open,             NULL,       NULL, NULL },
+	{ "Busmaster log",                          OPEN_INFO_HEURISTIC, busmaster_open,           NULL,       NULL, NULL },
 	/* ASCII trace files from Telnet sessions. */
 	{ "Lucent/Ascend access server trace",      OPEN_INFO_HEURISTIC, ascend_open,              "txt",      NULL, NULL },
 	{ "Toshiba Compact ISDN Router snoop",      OPEN_INFO_HEURISTIC, toshiba_open,             "txt",      NULL, NULL },
@@ -428,6 +432,7 @@ static const struct open_info open_info_base[] = {
 	{ "Ruby Marshal Object",                    OPEN_INFO_HEURISTIC, ruby_marshal_open,        "",         NULL, NULL },
 	{ "Systemd Journal",                        OPEN_INFO_HEURISTIC, systemd_journal_open,     "log;jnl;journal",      NULL, NULL },
 	{ "3gpp phone log",                         OPEN_INFO_MAGIC,     log3gpp_open,             "log",      NULL, NULL },
+	{ "MP4 media file",                         OPEN_INFO_MAGIC,     mp4_open,                 "mp4",      NULL, NULL },
 
 };
 
@@ -1663,6 +1668,11 @@ static const struct file_type_subtype_info dump_open_table_base[] = {
 	/* WTAP_FILE_TYPE_SUBTYPE_LOG_3GPP */
 	{ "3GPP Log", "3gpp_log", "*.log", NULL,
 	  TRUE, FALSE, 0,
+	  NULL, NULL, NULL },
+
+	/* WTAP_FILE_TYPE_SUBTYPE_MP4 */
+	{ "MP4 media", "mp4", "mp4", NULL,
+	  FALSE, FALSE, 0,
 	  NULL, NULL, NULL }
 };
 
@@ -2420,7 +2430,6 @@ wtap_dump_open_tempfile(char **filenamep, const char *pfx,
 	int fd;
 	const char *ext;
 	char sfx[16];
-	char *tmpname;
 	wtap_dumper *wdh;
 	WFILE_T fh;
 
@@ -2442,13 +2451,12 @@ wtap_dump_open_tempfile(char **filenamep, const char *pfx,
 	g_strlcat(sfx, ext, 16);
 
 	/* Choose a random name for the file */
-	fd = create_tempfile(&tmpname, pfx, sfx);
+	fd = create_tempfile(filenamep, pfx, sfx, NULL);
 	if (fd == -1) {
-		*err = errno;
+		*err = WTAP_ERR_CANT_OPEN;
 		g_free(wdh);
 		return NULL;	/* can't create file */
 	}
-	*filenamep = tmpname;
 
 	/* In case "fopen()" fails but doesn't set "errno", set "errno"
 	   to a generic "the open failed" error. */
@@ -2466,7 +2474,7 @@ wtap_dump_open_tempfile(char **filenamep, const char *pfx,
 		/* Get rid of the file we created; we couldn't finish
 		   opening it. */
 		wtap_dump_file_close(wdh);
-		ws_unlink(tmpname);
+		ws_unlink(*filenamep);
 		g_free(wdh);
 		return NULL;
 	}

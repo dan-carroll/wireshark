@@ -1,4 +1,4 @@
--- 3GPP TS 36.331 V15.6.0 (2019-06)
+-- 3GPP TS 36.331 V15.8.0 (2019-12)
 --
 NBIOT-RRC-Definitions DEFINITIONS AUTOMATIC TAGS ::=
 
@@ -659,8 +659,7 @@ RRCEarlyDataRequest-NB-r15 ::=		SEQUENCE {
 
 RRCEarlyDataRequest-NB-r15-IEs ::=	SEQUENCE {
 	s-TMSI-r15							S-TMSI,
-	establishmentCause-r15				ENUMERATED {mo-Data-r15, mo-ExceptionData-r15,
-											delayTolerantAccess-r15, spare1},
+	establishmentCause-r15				ENUMERATED {mo-Data, mo-ExceptionData, delayTolerantAccess, spare1},
 	cqi-NPDCCH-r15						CQI-NPDCCH-NB-r14 			OPTIONAL,
 	dedicatedInfoNAS-r15				DedicatedInfoNAS,
 	nonCriticalExtension				SEQUENCE {}					OPTIONAL
@@ -1117,8 +1116,8 @@ SystemInformationBlockType22-NB-r14 ::=	SEQUENCE {
 	lateNonCriticalExtension			OCTET STRING					OPTIONAL,
 	...,
 	[[	mixedOperationModeConfig-r15	SEQUENCE {
-			dl-ConfigListMixed-r15			DL-ConfigCommonList-NB-r14	OPTIONAL,	-- Need OR
-			ul-ConfigListMixed-r15			UL-ConfigCommonList-NB-r14	OPTIONAL,	-- Need OR
+			dl-ConfigListMixed-r15			DL-ConfigCommonList-NB-r14	OPTIONAL,	-- Cond dl-ConfigList
+			ul-ConfigListMixed-r15			UL-ConfigCommonList-NB-r14	OPTIONAL,	-- Cond ul-ConfigList
 			pagingDistribution-r15			ENUMERATED {true}			OPTIONAL,	-- Need OR
 			nprach-Distribution-r15			ENUMERATED {true}			OPTIONAL 	-- Need OR
 		}																OPTIONAL,	-- Need OR

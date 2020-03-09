@@ -44,6 +44,7 @@ ged125.desegment_body: FALSE
 giop.desegment_giop_messages: FALSE
 giop.reassemble: FALSE
 git.desegment: FALSE
+grpc.streaming_reassembly_mode: FALSE
 gryphon.desegment: FALSE
 gsm_sms.reassemble: FALSE
 gsm_sms.reassemble_with_lower_layers_info: FALSE
@@ -126,6 +127,7 @@ smpp.reassemble_smpp_over_tcp: FALSE
 smtp.desegment_lines: FALSE
 smtp.desegment_data: FALSE
 snmp.desegment: FALSE
+someip.reassemble_tp: FALSE
 slsk.desegment: FALSE
 soupbintcp.desegment: FALSE
 srvloc.desegment_tcp: FALSE
@@ -148,6 +150,7 @@ tns.desegment_tns_messages: FALSE
 tpkt.desegment: FALSE
 transum.reassembly: FALSE
 ucp.desegment_ucp_messages: FALSE
+udpcp.attempt_reassembly: FALSE
 ulp.desegment_ulp_messages: FALSE
 uma.desegment_ucp_messages: FALSE
 vnc.desegment: FALSE

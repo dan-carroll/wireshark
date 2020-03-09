@@ -25,6 +25,11 @@
 CPPCHECK=$(type -p cppcheck)
 CPPCHECK_DIR=$(dirname "$0")
 
+if [ -z "$CPPCHECK" ] ; then
+    echo "cppcheck not found"
+    exit 1
+fi
+
 THREADS=4
 LAST_COMMITS=0
 TARGET=""
@@ -82,7 +87,7 @@ if [ $# -gt 0 ]; then
     TARGET="$TARGET $*"
 fi
 
-if [ -z "TARGET" ] ; then
+if [ -z "$TARGET" ] ; then
     TARGET=.
 fi
 
@@ -93,9 +98,11 @@ trap : INT
 
 # shellcheck disable=SC2086
 $CPPCHECK --force --enable=style $QUIET    \
-          $SUPPRESSIONS $INCLUDES -i asn1/ \
-          --std=c99 --template=$TEMPLATE   \
-          -j $THREADS $TARGET 2>&1 | colorize
+    $SUPPRESSIONS $INCLUDES \
+    -i doc/ \
+    -i epan/dissectors/asn1/ \
+    --std=c99 --template=$TEMPLATE   \
+    -j $THREADS $TARGET 2>&1 | colorize
 
 if [ "$MODE" = "html" ]; then
     echo "</table></body></html>"

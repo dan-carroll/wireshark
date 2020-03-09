@@ -65,20 +65,20 @@ static guint temp_dynamic_payload_type = 0;
 static const value_string evs_protected_payload_sizes_value[] = {
     {    48, "EVS Primary SID 2.4" },
     {    56, "Special case" },
-    {   136, "EVS AMR-WB IO" },
+    {   136, "EVS AMR-WB IO 6.6" },
     {   144, "EVS Primary 7.2" },
     {   160, "EVS Primary 8.0" },
-    {   184, "EVS AMR-WB IO" },
+    {   184, "EVS AMR-WB IO 8.85" },
     {   192, "EVS Primary 9.6" },
-    {   256, "EVS AMR-WB IO" },
+    {   256, "EVS AMR-WB IO 12.65" },
     {   264, "EVS Primary 13.2" },
-    {   288, "EVS AMR-WB IO" },
-    {   320, "EVS AMR-WB IO" },
+    {   288, "EVS AMR-WB IO 14.25" },
+    {   320, "EVS AMR-WB IO 15.85" },
     {   328, "EVS Primary 16.4" },
-    {   368, "EVS AMR-WB IO" },
-    {   400, "EVS AMR-WB IO" },
-    {   464, "EVS AMR-WB IO" },
-    {   480, "EVS Primary 24.0" },
+    {   368, "EVS AMR-WB IO 18.25" },
+    {   400, "EVS AMR-WB IO 19.85" },
+    {   464, "EVS AMR-WB IO 23.05" },
+    {   480, "EVS AMR-WB IO 23.85" },
     {   488, "EVS Primary 24.4" },
     {   640, "EVS Primary 32.0" },
     {   960, "EVS Primary 48.0" },
@@ -517,7 +517,7 @@ dissect_evs_cmr(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *evs_tree, int
         break;
 
     }
-    col_append_fstr(pinfo->cinfo, COL_INFO, ", %s ", str);
+    col_append_fstr(pinfo->cinfo, COL_INFO, ", %s", str);
 }
 
 /* Code to actually dissect the packets */
@@ -533,6 +533,7 @@ dissect_evs(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
     guint8 oct, h_bit, toc_f_bit, evs_mode_b;
     int num_toc, num_data;
     guint64 value;
+    gboolean is_compact = FALSE;
 
     /* Make entries in Protocol column and Info column on summary display */
     col_set_str(pinfo->cinfo, COL_PROTOCOL, "EVS");
@@ -541,18 +542,39 @@ dissect_evs(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
     /* Find out if we have one of the reserved packet sizes*/
     packet_len = tvb_reported_length(tvb);
     num_bits = packet_len * 8;
-    str = try_val_to_str_idx(num_bits, evs_protected_payload_sizes_value, &idx);
+    if (num_bits == 56) {
+        /* A.2.1.3 Special case for 56 bit payload size (EVS Primary or EVS AMR-WB IO SID) */
+        /* The resulting ambiguity between EVS Primary 2.8 kbps and EVS AMR-WB IO SID frames is resolved through the
+           most significant bit (MSB) of the first byte of the payload. By definition, the first data bit d(0) of the EVS Primary 2.8
+           kbps is always set to '0'.
+         */
+        oct = tvb_get_bits8(tvb, bit_offset, 1);
+        if (oct == 0) {
+            /* EVS Primary 2.8 kbps */
+            str = "EVS Primary 2.8 kbps";
+            col_append_fstr(pinfo->cinfo, COL_INFO, ", %s", str);
+            is_compact = TRUE;
+        } else {
+            /* EVS AMR-WB IO SID */
+            str = "EVS AMR-WB IO SID";
+        }
+    } else {
+        str = try_val_to_str_idx(num_bits, evs_protected_payload_sizes_value, &idx);
+        if (str) {
+            is_compact = TRUE;
+        }
+    }
     ti = proto_tree_add_item(tree, proto_evs, tvb, 0, -1, ENC_NA);
     evs_tree = proto_item_add_subtree(ti, ett_evs);
-    if (str) {
+    if (is_compact) {
         /* A.2.1 EVS codec Compact Format */
         proto_tree_add_subtree(evs_tree, tvb, offset, -1, ett_evs_header, &ti, "Framing Mode: Compact");
         proto_item_set_generated(ti);
 
-        /* One of the protected payload sizes, no further dissection currently. XXX add handling of "Special case"*/
-        col_append_fstr(pinfo->cinfo, COL_INFO, ", %s ", str);
+        /* One of the protected payload sizes, no further dissection currently.*/
+        col_append_fstr(pinfo->cinfo, COL_INFO, ", %s", str);
         proto_tree_add_int_format(evs_tree, hf_evs_packet_length, tvb, offset, 1, packet_len * 8, " %s, packet_len %i bits", str, packet_len * 8);
-        if (strcmp(str, "EVS A") == 0) {
+        if (strncmp(str, "EVS A", 5) == 0) {
             /* A.2.1.2	Compact format for EVS AMR-WB IO mode */
             /* CMR */
             proto_tree_add_item(evs_tree, hf_evs_cmr_amr_io, tvb, offset, 1, ENC_BIG_ENDIAN);
@@ -617,6 +639,13 @@ dissect_evs(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
                  /* CMR */
             proto_tree_add_item(evs_tree, hf_evs_cmr_amr_io, tvb, offset, 1, ENC_BIG_ENDIAN);
             break;
+        case 56:
+            /* A.2.1.3 Special case for 56 bit payload size (EVS Primary or EVS AMR-WB IO SID) */
+            /* The resulting ambiguity between EVS Primary 2.8 kbps and EVS AMR-WB IO SID frames is resolved through the
+               most significant bit (MSB) of the first byte of the payload. By definition, the first data bit d(0) of the EVS Primary 2.8
+               kbps is always set to '0'.
+             */
+            break;
         case 61: /* 488 EVS Primary 24.4 */
             /* 7.1.3	Bit allocation at 16.4 and 24.4 kbps */
             /* BW 2 bits*/
@@ -662,7 +691,7 @@ dissect_evs(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
         evs_mode_b = (oct & 0x20) >> 5;
         num_toc++;
 
-        sub_tree = proto_tree_add_subtree_format(evs_tree, tvb, offset, 1, ett_evs_header, NULL, "TOC # %u",
+        sub_tree = proto_tree_add_subtree_format(evs_tree, tvb, offset, 1, ett_evs_header, NULL, " TOC # %u",
             num_toc);
 
         if (evs_mode_b == 0) {
@@ -676,6 +705,7 @@ dissect_evs(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
             };
 
             proto_tree_add_bitmask_list(sub_tree, tvb, offset, 1, flags_toc_mode_0, ENC_BIG_ENDIAN);
+            str = val_to_str_const((oct & 0x0f), evs_bit_rate_mode_0_values, "Unknown value");
         } else {
             static const int * flags_toc_mode_1[] = {
             &hf_evs_h_bit,
@@ -685,9 +715,10 @@ dissect_evs(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
             &hf_evs_bit_rate_mode_1,
             NULL
             };
-
             proto_tree_add_bitmask_list(sub_tree, tvb, offset, 1, flags_toc_mode_1, ENC_BIG_ENDIAN);
+            str = val_to_str_const((oct & 0x0f), evs_bit_rate_mode_1_values, "Unknown value");
         }
+        col_append_fstr(pinfo->cinfo, COL_INFO, ", %s", str);
         offset++;
     } while (toc_f_bit == 1);
 

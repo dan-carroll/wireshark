@@ -24,8 +24,10 @@
 #include <epan/expert.h>
 #include <epan/prefs.h>
 #include <epan/proto_data.h>
+#include <epan/conversation.h>
 #include <epan/uat.h>
 #include <wsutil/file_util.h>
+#include <wsutil/filesystem.h>
 #include <wsutil/wsgcrypt.h>
 #include <wsutil/curve25519.h>
 #include <epan/secrets.h>
@@ -82,6 +84,7 @@ static const char  *pref_keylog_file;
 
 static dissector_handle_t ip_handle;
 #endif /* WG_DECRYPTION_SUPPORTED */
+static dissector_handle_t wg_handle;
 
 
 // Length of AEAD authentication tag
@@ -619,27 +622,6 @@ wg_psk_iter_next(wg_psk_iter_context *psk_iter, const wg_handshake_state_t *hs,
 /* PSK handling. }}} */
 
 /* UAT and key configuration. {{{ */
-/* XXX this is copied verbatim from packet-tls-utils.c - create new common API
- * for retrieval of runtime secrets? */
-static gboolean
-file_needs_reopen(FILE *fp, const char *filename)
-{
-    ws_statb64 open_stat, current_stat;
-
-    /* consider a file deleted when stat fails for either file,
-     * or when the residing device / inode has changed. */
-    if (0 != ws_fstat64(ws_fileno(fp), &open_stat))
-        return TRUE;
-    if (0 != ws_stat64(filename, &current_stat))
-        return TRUE;
-
-    /* Note: on Windows, ino may be 0. Existing files cannot be deleted on
-     * Windows, but hopefully the size is a good indicator when a file got
-     * removed and recreated */
-    return  open_stat.st_dev != current_stat.st_dev ||
-            open_stat.st_ino != current_stat.st_ino ||
-            open_stat.st_size > current_stat.st_size;
-}
 
 static void
 wg_keylog_reset(void)
@@ -660,8 +642,8 @@ wg_keylog_read(void)
         return;
     }
 
-    // Reopen file if it got deleted.
-    if (wg_keylog_file && file_needs_reopen(wg_keylog_file, pref_keylog_file)) {
+    // Reopen file if it got deleted/overwritten.
+    if (wg_keylog_file && file_needs_reopen(ws_fileno(wg_keylog_file), pref_keylog_file)) {
         g_debug("Key log file got changed or deleted, trying to re-open.");
         wg_keylog_reset();
     }
@@ -1163,8 +1145,12 @@ wg_mac1_key_probe(tvbuff_t *tvb, gboolean is_initiation)
         return NULL;
     }
 
-    const guint8 *mac1_msgdata = tvb_get_ptr(tvb, 0, mac1_offset);
+    guint8 *mac1_msgdata = (guint8 *)tvb_memdup(wmem_packet_scope(), tvb, 0, mac1_offset);
     const guint8 *mac1_output = tvb_get_ptr(tvb, mac1_offset, 16);
+
+    // MAC1 is computed over a message with three reserved bytes set to zero.
+    mac1_msgdata[1] = mac1_msgdata[2] = mac1_msgdata[3] = 0;
+
     // Find public key that matches the 16-byte MAC1 field.
     GHashTableIter iter;
     gpointer value;
@@ -1392,7 +1378,7 @@ wg_dissect_handshake_initiation(tvbuff_t *tvb, packet_info *pinfo, proto_tree *w
                 wg_process_initiation(tvb, hs);
             }
         }
-    } else if (wg_pinfo->session) {
+    } else if (wg_pinfo && wg_pinfo->session) {
         hs = wg_pinfo->session->hs;
     }
 #endif /* WG_DECRYPTION_SUPPORTED */
@@ -1426,7 +1412,7 @@ wg_dissect_handshake_initiation(tvbuff_t *tvb, packet_info *pinfo, proto_tree *w
         wg_sessions_insert(sender_id, session);
         wg_pinfo->session = session;
     }
-    wg_session_t *session = wg_pinfo->session;
+    wg_session_t *session = wg_pinfo ? wg_pinfo->session : NULL;
     if (session) {
         ti = proto_tree_add_uint(wg_tree, hf_wg_stream, tvb, 0, 0, session->stream);
         proto_item_set_generated(ti);
@@ -1465,7 +1451,7 @@ wg_dissect_handshake_response(tvbuff_t *tvb, packet_info *pinfo, proto_tree *wg_
         }
 #endif /* WG_DECRYPTION_SUPPORTED */
     } else {
-        session = wg_pinfo->session;
+        session = wg_pinfo ? wg_pinfo->session : NULL;
     }
 
     wg_dissect_pubkey(wg_tree, tvb, 12, TRUE);
@@ -1524,7 +1510,7 @@ wg_dissect_handshake_cookie(tvbuff_t *tvb, packet_info *pinfo, proto_tree *wg_tr
         }
         /* XXX check for cookie reply from Initiator to Responder */
     } else {
-        session = wg_pinfo->session;
+        session = wg_pinfo ? wg_pinfo->session : NULL;
     }
     if (session) {
         ti = proto_tree_add_uint(wg_tree, hf_wg_stream, tvb, 0, 0, session->stream);
@@ -1573,7 +1559,7 @@ wg_dissect_data(tvbuff_t *tvb, packet_info *pinfo, proto_tree *wg_tree, wg_packe
             wg_pinfo->receiver_is_initiator = receiver_is_initiator;
         }
     } else {
-        session = wg_pinfo->session;
+        session = wg_pinfo ? wg_pinfo->session : NULL;
     }
     if (session) {
         ti = proto_tree_add_uint(wg_tree, hf_wg_stream, tvb, 0, 0, session->stream);
@@ -1589,6 +1575,23 @@ wg_dissect_data(tvbuff_t *tvb, packet_info *pinfo, proto_tree *wg_tree, wg_packe
     return 16 + packet_length;
 }
 
+static gboolean
+wg_is_valid_message_length(guint8 message_type, guint length)
+{
+    switch (message_type) {
+    case WG_TYPE_HANDSHAKE_INITIATION:
+        return length == 148;
+    case WG_TYPE_HANDSHAKE_RESPONSE:
+        return length == 92;
+    case WG_TYPE_COOKIE_REPLY:
+        return length == 64;
+    case WG_TYPE_TRANSPORT_DATA:
+        return length >= 32;
+    default:
+        return FALSE;
+    }
+}
+
 static int
 dissect_wg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
 {
@@ -1598,14 +1601,14 @@ dissect_wg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
     const char *message_type_str;
     wg_packet_info_t *wg_pinfo;
 
-    /* Heuristics check: check for reserved bits (zeros) and message type. */
-    if (tvb_reported_length(tvb) < 4 || tvb_get_ntoh24(tvb, 1) != 0)
-        return 0;
-
     message_type = tvb_get_guint8(tvb, 0);
     message_type_str = try_val_to_str(message_type, wg_type_names);
     if (!message_type_str)
         return 0;
+
+    if (!wg_is_valid_message_length(message_type, tvb_reported_length(tvb))) {
+        return 0;
+    }
 
     /* Special case: zero-length data message is a Keepalive message. */
     if (message_type == WG_TYPE_TRANSPORT_DATA && tvb_reported_length(tvb) == 32) {
@@ -1625,6 +1628,13 @@ dissect_wg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
         wg_pinfo = wmem_new0(wmem_file_scope(), wg_packet_info_t);
         p_add_proto_data(wmem_file_scope(), pinfo, proto_wg, 0, wg_pinfo);
     } else {
+        /*
+         * Note: this may be NULL if the heuristics dissector sets a
+         * conversation dissector later in the stream, for example due to a new
+         * Handshake Initiation message. Previous messages are potentially
+         * Transport Data messages which might not be detected through
+         * heuristics.
+         */
         wg_pinfo = (wg_packet_info_t *)p_get_proto_data(wmem_file_scope(), pinfo, proto_wg, 0);
     }
 
@@ -1640,6 +1650,57 @@ dissect_wg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
     }
 
     DISSECTOR_ASSERT_NOT_REACHED();
+}
+
+static gboolean
+dissect_wg_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
+{
+    /*
+     * Heuristics to detect the WireGuard protocol:
+     * - The first byte must be one of the valid four messages.
+     * - The total packet length depends on the message type, and is fixed for
+     *   three of them. The Data type has a minimum length however.
+     * - The next three bytes are reserved and zero in the official protocol.
+     *   Cloudflare's implementation however uses this field for load balancing
+     *   purposes, so this condition is not checked here for most messages.
+     *   It is checked for data messages to avoid false positives.
+     */
+    guint32     message_type;
+    gboolean    reserved_is_zeroes;
+
+    if (tvb_reported_length(tvb) < 4)
+        return FALSE;
+
+    message_type = tvb_get_guint8(tvb, 0);
+    reserved_is_zeroes = tvb_get_ntoh24(tvb, 1) == 0;
+
+    if (!wg_is_valid_message_length(message_type, tvb_reported_length(tvb))) {
+        return FALSE;
+    }
+
+    switch (message_type) {
+        case WG_TYPE_COOKIE_REPLY:
+        case WG_TYPE_TRANSPORT_DATA:
+            if (!reserved_is_zeroes)
+                return FALSE;
+            break;
+    }
+
+    /*
+     * Assuming that this is a new handshake, make sure that future messages are
+     * directed to our dissector. This ensures that cookie replies and data
+     * messages using non-zero reserved bytes are still properly recognized.
+     * An edge case occurs when the address or port change. In that case, Data
+     * messages using non-zero reserved bytes will not be recognized. The user
+     * can use Decode As for this case.
+     */
+    if (message_type == WG_TYPE_HANDSHAKE_INITIATION) {
+        conversation_t *conversation = find_or_create_conversation(pinfo);
+        conversation_set_dissector(conversation, wg_handle);
+    }
+
+    dissect_wg(tvb, pinfo, tree, NULL);
+    return TRUE;
 }
 
 static void
@@ -1665,7 +1726,7 @@ proto_register_wg(void)
         },
         { &hf_wg_reserved,
           { "Reserved", "wg.reserved",
-            FT_NONE, BASE_NONE, NULL, 0x0,
+            FT_BYTES, BASE_NONE, NULL, 0x0,
             NULL, HFILL }
         },
         { &hf_wg_sender,
@@ -1844,7 +1905,7 @@ proto_register_wg(void)
     expert_wg = expert_register_protocol(proto_wg);
     expert_register_field_array(expert_wg, ei, array_length(ei));
 
-    register_dissector("wg", dissect_wg, proto_wg);
+    wg_handle = register_dissector("wg", dissect_wg, proto_wg);
 
 #ifdef WG_DECRYPTION_SUPPORTED
     wg_module = prefs_register_protocol(proto_wg, NULL);
@@ -1900,7 +1961,8 @@ proto_register_wg(void)
 void
 proto_reg_handoff_wg(void)
 {
-    heur_dissector_add("udp", dissect_wg, "WireGuard", "wg", proto_wg, HEURISTIC_ENABLE);
+    dissector_add_uint_with_preference("udp.port", 0, wg_handle);
+    heur_dissector_add("udp", dissect_wg_heur, "WireGuard", "wg", proto_wg, HEURISTIC_ENABLE);
 
 #ifdef WG_DECRYPTION_SUPPORTED
     ip_handle = find_dissector("ip");

@@ -1834,6 +1834,7 @@ static const value_string v10_template_types_niagara_networks[] = {
     { 119, "SslCertificateSubjectPublicAlgorithmText" },
     { 120, "SslCertificateSubjectAlgorithmText" },
     { 121, "SslCertificateSubjectAlternativeName" },
+    { 122, "SslCertificateSha1" },
     { 200, "DnsIdentifier" },
     { 201, "DnsOpCode" },
     { 202, "DnsResponseCode" },
@@ -1875,6 +1876,28 @@ static const value_string v10_template_types_niagara_networks[] = {
     { 238, "DnsAdditionalTTL" },
     { 239, "DnsAdditionalRDLength" },
     { 240, "DnsAdditionalRData" },
+    { 300, "RadiusPacketTypeCode" },
+    { 301, "RadiusPacketTypeCodeText" },
+    { 302, "RadiusPacketIdentifier" },
+    { 303, "RadiusAuthenticator" },
+    { 304, "RadiusUserName" },
+    { 305, "RadiusCallingStationId" },
+    { 306, "RadiusCalledStationId" },
+    { 307, "RadiusNasIpAddress" },
+    { 308, "RadiusNasIpv6Address" },
+    { 309, "RadiusNasIdentifier" },
+    { 310, "RadiusFramedIpAddress" },
+    { 311, "RadiusFramedIpv6Address" },
+    { 312, "RadiusAcctSessionId" },
+    { 313, "RadiusAcctStatusType" },
+    { 314, "RadiusAcctInOctets" },
+    { 315, "RadiusAcctOutOctets" },
+    { 316, "RadiusAcctInPackets" },
+    { 317, "RadiusAcctOutPackets" },
+    { 318, "RadiusVsaVendorId" },
+    { 319, "RadiusVsaName" },
+    { 320, "RadiusVsaId" },
+    { 321, "RadiusVsaValue" },
     { 0, NULL }
 };
 static value_string_ext v10_template_types_niagara_networks_ext = VALUE_STRING_EXT_INIT(v10_template_types_niagara_networks);
@@ -3419,6 +3442,7 @@ static int      hf_pie_niagara_networks_sslcertificatesubjectpublicalgorithm    
 static int      hf_pie_niagara_networks_sslcertificatesubjectpublicalgorithmtext    = -1;
 static int      hf_pie_niagara_networks_sslcertificatesubjectalgorithmtext          = -1;
 static int      hf_pie_niagara_networks_sslcertificatesubjectalternativename        = -1;
+static int      hf_pie_niagara_networks_sslcertificatesha1                          = -1;
 static int      hf_pie_niagara_networks_dnsidentifier                               = -1;
 static int      hf_pie_niagara_networks_dnsopcode                                   = -1;
 static int      hf_pie_niagara_networks_dnsresponsecode                             = -1;
@@ -3460,6 +3484,28 @@ static int      hf_pie_niagara_networks_dnsadditionalclasstext                  
 static int      hf_pie_niagara_networks_dnsadditionalttl                            = -1;
 static int      hf_pie_niagara_networks_dnsadditionalrdlength                       = -1;
 static int      hf_pie_niagara_networks_dnsadditionalrdata                          = -1;
+static int      hf_pie_niagara_networks_radiuspackettypecode                        = -1;
+static int      hf_pie_niagara_networks_radiuspackettypecodetext                    = -1;
+static int      hf_pie_niagara_networks_radiuspacketidentifier                      = -1;
+static int      hf_pie_niagara_networks_radiusauthenticator                         = -1;
+static int      hf_pie_niagara_networks_radiususername                              = -1;
+static int      hf_pie_niagara_networks_radiuscallingstationid                      = -1;
+static int      hf_pie_niagara_networks_radiuscalledstationid                       = -1;
+static int      hf_pie_niagara_networks_radiusnasipaddress                          = -1;
+static int      hf_pie_niagara_networks_radiusnasipv6address                        = -1;
+static int      hf_pie_niagara_networks_radiusnasidentifier                         = -1;
+static int      hf_pie_niagara_networks_radiusframedipaddress                       = -1;
+static int      hf_pie_niagara_networks_radiusframedipv6address                     = -1;
+static int      hf_pie_niagara_networks_radiusacctsessionid                         = -1;
+static int      hf_pie_niagara_networks_radiusacctstatustype                        = -1;
+static int      hf_pie_niagara_networks_radiusacctinoctets                          = -1;
+static int      hf_pie_niagara_networks_radiusacctoutoctets                         = -1;
+static int      hf_pie_niagara_networks_radiusacctinpackets                         = -1;
+static int      hf_pie_niagara_networks_radiusacctoutpackets                        = -1;
+static int      hf_pie_niagara_networks_radiusvsavendorid                           = -1;
+static int      hf_pie_niagara_networks_radiusvsaname                               = -1;
+static int      hf_pie_niagara_networks_radiusvsaid                                 = -1;
+static int      hf_pie_niagara_networks_radiusvsavalue                              = -1;
 
 static int      hf_string_len_short = -1;
 static int      hf_string_len_long  = -1;
@@ -3803,7 +3849,7 @@ dissect_netflow(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data 
     hdrinfo_t       hdrinfo;
     guint32         flow_sequence = 0; /* TODO: could be part of hdrinfo struct? */
     proto_item      *flow_sequence_ti = NULL;
-    gint            flow_len = -1;
+    gint            flow_len = -1;    /* v10 only */
     guint           available, pdusize, offset = 0;
     nstime_t        ts;
     dissect_pdu_t  *pduptr;
@@ -3868,7 +3914,6 @@ dissect_netflow(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data 
         flow_len = pdus;
     } else {
         proto_tree_add_uint(netflow_tree, hf_cflow_count, tvb, offset, 2, pdus);
-        flow_len = -1;
     }
     offset += 2;
 
@@ -10856,6 +10901,11 @@ dissect_v9_v10_pdu_data(tvbuff_t *tvb, packet_info *pinfo, proto_tree *pdutree, 
                                      tvb, offset, length, ENC_UTF_8|ENC_NA);
             break;
 
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 122):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_sslcertificatesha1,
+                                     tvb, offset, length, ENC_NA);
+            break;
+
         case ((VENDOR_NIAGARA_NETWORKS << 16) | 200):
             ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_dnsidentifier,
                                      tvb, offset, length, ENC_BIG_ENDIAN);
@@ -11059,6 +11109,116 @@ dissect_v9_v10_pdu_data(tvbuff_t *tvb, packet_info *pinfo, proto_tree *pdutree, 
         case ((VENDOR_NIAGARA_NETWORKS << 16) | 240):
             ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_dnsadditionalrdata,
                                      tvb, offset, length, ENC_UTF_8|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 300):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiuspackettypecode,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 301):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiuspackettypecodetext,
+                                     tvb, offset, length, ENC_UTF_8|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 302):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiuspacketidentifier,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 303):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusauthenticator,
+                                     tvb, offset, length, ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 304):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiususername,
+                                     tvb, offset, length, ENC_ASCII|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 305):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiuscallingstationid,
+                                     tvb, offset, length, ENC_ASCII|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 306):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiuscalledstationid,
+                                     tvb, offset, length, ENC_ASCII|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 307):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusnasipaddress,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 308):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusnasipv6address,
+                                     tvb, offset, length, ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 309):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusnasidentifier,
+                                     tvb, offset, length, ENC_ASCII|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 310):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusframedipaddress,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 311):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusframedipv6address,
+                                     tvb, offset, length, ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 312):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusacctsessionid,
+                                     tvb, offset, length, ENC_ASCII|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 313):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusacctstatustype,
+                                     tvb, offset, length, ENC_ASCII|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 314):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusacctinoctets,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 315):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusacctoutoctets,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 316):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusacctinpackets,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 317):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusacctoutpackets,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 318):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusvsavendorid,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 319):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusvsaname,
+                                     tvb, offset, length, ENC_UTF_8|ENC_NA);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 320):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusvsaid,
+                                     tvb, offset, length, ENC_BIG_ENDIAN);
+            break;
+
+        case ((VENDOR_NIAGARA_NETWORKS << 16) | 321):
+            ti = proto_tree_add_item(pdutree, hf_pie_niagara_networks_radiusvsavalue,
+                                     tvb, offset, length, ENC_NA);
             break;
 
             /* END Niagara Networks */
@@ -18209,6 +18369,12 @@ proto_register_netflow(void)
           FT_STRING, STR_UNICODE, NULL, 0x0,
           NULL, HFILL}
         },
+        /* Niagara Networks, 47729 / 122 */
+        {&hf_pie_niagara_networks_sslcertificatesha1,
+         {"SslCertificateSha1", "cflow.pie.niagaranetworks.sslcertificatesha1",
+          FT_BYTES, BASE_NONE, NULL, 0x0,
+          NULL, HFILL}
+        },
         /* Niagara Networks, 47729 / 200 */
         {&hf_pie_niagara_networks_dnsidentifier,
          {"DnsIdentifier", "cflow.pie.niagaranetworks.dnsidentifier",
@@ -18453,6 +18619,138 @@ proto_register_netflow(void)
         {&hf_pie_niagara_networks_dnsadditionalrdata,
          {"DnsAdditionalRData", "cflow.pie.niagaranetworks.dnsadditionalrdata",
           FT_STRING, STR_UNICODE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 300 */
+        {&hf_pie_niagara_networks_radiuspackettypecode,
+         {"RadiusPacketTypeCode", "cflow.pie.niagaranetworks.radiuspackettypecode",
+          FT_UINT8, BASE_DEC, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 301 */
+        {&hf_pie_niagara_networks_radiuspackettypecodetext,
+         {"RadiusPacketTypeCodeText", "cflow.pie.niagaranetworks.radiuspackettypecodetext",
+          FT_STRING, STR_UNICODE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 302 */
+        {&hf_pie_niagara_networks_radiuspacketidentifier,
+         {"RadiusPacketIdentifier", "cflow.pie.niagaranetworks.radiuspacketidentifier",
+          FT_UINT8, BASE_HEX, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 303 */
+        {&hf_pie_niagara_networks_radiusauthenticator,
+         {"RadiusAuthenticator", "cflow.pie.niagaranetworks.radiusauthenticator",
+          FT_BYTES, BASE_NONE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 304 */
+        {&hf_pie_niagara_networks_radiususername,
+         {"RadiusUserName", "cflow.pie.niagaranetworks.radiususername",
+          FT_STRING, STR_ASCII, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 305 */
+        {&hf_pie_niagara_networks_radiuscallingstationid,
+         {"RadiusCallingStationId", "cflow.pie.niagaranetworks.radiuscallingstationid",
+          FT_STRING, STR_ASCII, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 306 */
+        {&hf_pie_niagara_networks_radiuscalledstationid,
+         {"RadiusCalledStationId", "cflow.pie.niagaranetworks.radiuscalledstationid",
+          FT_STRING, STR_ASCII, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 307 */
+        {&hf_pie_niagara_networks_radiusnasipaddress,
+         {"RadiusNasIpAddress", "cflow.pie.niagaranetworks.radiusnasipaddress",
+          FT_IPv4, BASE_NONE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 308 */
+        {&hf_pie_niagara_networks_radiusnasipv6address,
+         {"RadiusNasIpv6Address", "cflow.pie.niagaranetworks.radiusnasipv6address",
+          FT_IPv6, BASE_NONE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 309 */
+        {&hf_pie_niagara_networks_radiusnasidentifier,
+         {"RadiusNasIdentifier", "cflow.pie.niagaranetworks.radiusnasidentifier",
+          FT_STRING, STR_ASCII, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 310 */
+        {&hf_pie_niagara_networks_radiusframedipaddress,
+         {"RadiusFramedIpAddress", "cflow.pie.niagaranetworks.radiusframedipaddress",
+          FT_IPv4, BASE_NONE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 311 */
+        {&hf_pie_niagara_networks_radiusframedipv6address,
+         {"RadiusFramedIpv6Address", "cflow.pie.niagaranetworks.radiusframedipv6address",
+          FT_IPv6, BASE_NONE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 312 */
+        {&hf_pie_niagara_networks_radiusacctsessionid,
+         {"RadiusAcctSessionId", "cflow.pie.niagaranetworks.radiusacctsessionid",
+          FT_STRING, STR_ASCII, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 313 */
+        {&hf_pie_niagara_networks_radiusacctstatustype,
+         {"RadiusAcctStatusType", "cflow.pie.niagaranetworks.radiusacctstatustype",
+          FT_STRING, STR_ASCII, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 314 */
+        {&hf_pie_niagara_networks_radiusacctinoctets,
+         {"RadiusAcctInOctets", "cflow.pie.niagaranetworks.radiusacctinoctets",
+          FT_UINT32, BASE_DEC, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 315 */
+        {&hf_pie_niagara_networks_radiusacctoutoctets,
+         {"RadiusAcctOutOctets", "cflow.pie.niagaranetworks.radiusacctoutoctets",
+          FT_UINT32, BASE_DEC, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 316 */
+        {&hf_pie_niagara_networks_radiusacctinpackets,
+         {"RadiusAcctInPackets", "cflow.pie.niagaranetworks.radiusacctinpackets",
+          FT_UINT32, BASE_DEC, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 317 */
+        {&hf_pie_niagara_networks_radiusacctoutpackets,
+         {"RadiusAcctOutPackets", "cflow.pie.niagaranetworks.radiusacctoutpackets",
+          FT_UINT32, BASE_DEC, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 318 */
+        {&hf_pie_niagara_networks_radiusvsavendorid,
+         {"RadiusVsaVendorId", "cflow.pie.niagaranetworks.radiusvsavendorid",
+          FT_UINT32, BASE_DEC, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 319 */
+        {&hf_pie_niagara_networks_radiusvsaname,
+         {"RadiusVsaName", "cflow.pie.niagaranetworks.radiusvsaname",
+          FT_STRING, STR_UNICODE, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 320 */
+        {&hf_pie_niagara_networks_radiusvsaid,
+         {"RadiusVsaId", "cflow.pie.niagaranetworks.radiusvsaid",
+          FT_UINT8, BASE_DEC, NULL, 0x0,
+          NULL, HFILL}
+        },
+        /* Niagara Networks, 47729 / 321 */
+        {&hf_pie_niagara_networks_radiusvsavalue,
+         {"RadiusVsaValue", "cflow.pie.niagaranetworks.radiusvsavalue",
+          FT_BYTES, BASE_NONE, NULL, 0x0,
           NULL, HFILL}
         },
 
@@ -18794,6 +19092,8 @@ proto_register_netflow(void)
     expert_module_t* expert_netflow;
 
     proto_netflow = proto_register_protocol("Cisco NetFlow/IPFIX", "CFLOW", "cflow");
+
+    register_dissector("cflow", dissect_netflow, proto_netflow);
 
     proto_register_field_array(proto_netflow, hf, array_length(hf));
     proto_register_subtree_array(ett, array_length(ett));

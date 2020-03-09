@@ -28,6 +28,7 @@
 #include <wiretap/wtap.h>
 
 #include "packet-http.h"
+#include "packet-acdr.h"
 
 void proto_register_json(void);
 void proto_reg_handoff_json(void);
@@ -36,6 +37,9 @@ static char *json_string_unescape(tvbparse_elem_t *tok);
 static dissector_handle_t json_handle;
 
 static int proto_json = -1;
+
+//Used to get AC DR proto data
+static int proto_acdr = -1;
 
 static gint ett_json = -1;
 static gint ett_json_array = -1;
@@ -163,14 +167,16 @@ dissect_json(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data)
 	int offset;
 
 	/* JSON dissector can be called in a JSON native file or when transported
-	 * by another protocol. We set the column values only if they've not been
-	 * already set by someone else.
+	 * by another protocol, will make entry in the Protocol column on summary display accordingly
 	 */
 	wmem_list_frame_t *proto = wmem_list_frame_prev(wmem_list_tail(pinfo->layers));
 	if (proto) {
 		const char *name = proto_get_protocol_filter_name(GPOINTER_TO_INT(wmem_list_frame_data(proto)));
 
-		if (!strcmp(name, "frame")) {
+		if (strcmp(name, "frame")) {
+			col_append_sep_str(pinfo->cinfo, COL_PROTOCOL, "/", "JSON");
+			col_append_sep_str(pinfo->cinfo, COL_INFO, NULL, "JavaScript Object Notation");
+		} else {
 			col_set_str(pinfo->cinfo, COL_PROTOCOL, "JSON");
 			col_set_str(pinfo->cinfo, COL_INFO, "JavaScript Object Notation");
 		}
@@ -750,8 +756,7 @@ static void init_json_parser(void) {
 	/* XXX, heur? */
 }
 
-/* This function tries to undestand if the payload is json or not
-*/
+/* This function tries to understand if the payload is json or not */
 static gboolean
 dissect_json_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
 {
@@ -763,6 +768,18 @@ dissect_json_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *dat
 
 	return (dissect_json(tvb, pinfo, tree, data) != 0);
 }
+
+/* This function tries to understand if the payload is sitting on top of AC DR */
+static gboolean
+dissect_json_acdr_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
+{
+	guint acdr_prot = GPOINTER_TO_UINT(p_get_proto_data(pinfo->pool, pinfo, proto_acdr, 0));
+	if (acdr_prot == ACDR_VoiceAI)
+		return dissect_json_heur(tvb, pinfo, tree, data);
+	return FALSE;
+}
+
+
 
 void
 proto_register_json(void)
@@ -822,6 +839,7 @@ proto_reg_handoff_json(void)
 
 	heur_dissector_add("hpfeeds", dissect_json_heur, "JSON over HPFEEDS", "json_hpfeeds", proto_json, HEURISTIC_ENABLE);
 	heur_dissector_add("db-lsp", dissect_json_heur, "JSON over DB-LSP", "json_db_lsp", proto_json, HEURISTIC_ENABLE);
+	heur_dissector_add("udp", dissect_json_acdr_heur, "JSON over AC DR", "json_acdr", proto_json, HEURISTIC_ENABLE);
 	dissector_add_uint("wtap_encap", WTAP_ENCAP_JSON, json_file_handle);
 
 	dissector_add_for_decode_as("udp.port", json_file_handle);
@@ -831,11 +849,15 @@ proto_reg_handoff_json(void)
 	dissector_add_string("media_type", "application/jsonrequest", json_handle); /* JSON-RPC over HTTP */
 	dissector_add_string("media_type", "application/dds-web+json", json_handle); /* DDS Web Integration Service over HTTP */
 	dissector_add_string("media_type", "application/vnd.oma.lwm2m+json", json_handle); /* LWM2M JSON over CoAP */
+	dissector_add_string("media_type", "application/problem+json", json_handle); /* RFC 7807 Problem Details for HTTP APIs*/
+	dissector_add_string("media_type", "application/merge-patch+json", json_handle); /* RFC 7386 HTTP PATCH methods (RFC 5789) */
 	dissector_add_string("grpc_message_type", "application/grpc+json", json_handle);
 	dissector_add_uint_range_with_preference("tcp.port", "", json_file_handle); /* JSON-RPC over TCP */
 	dissector_add_uint_range_with_preference("udp.port", "", json_file_handle); /* JSON-RPC over UDP */
 
 	text_lines_handle = find_dissector_add_dependency("data-text-lines", proto_json);
+
+	proto_acdr = proto_get_id_by_filter_name("acdr");
 }
 
 /*

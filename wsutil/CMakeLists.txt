@@ -34,6 +34,7 @@ set(WSUTIL_PUBLIC_HEADERS
 	crc32.h
 	curve25519.h
 	eax.h
+	epochs.h
 	filesystem.h
 	frequency-utils.h
 	g711.h
@@ -260,6 +261,7 @@ target_link_libraries(wsutil
 	${GCRYPT_LIBRARIES}
 	${WIN_WS2_32_LIBRARY}
 	${GNUTLS_LIBRARIES}
+	${M_LIBRARIES}
 )
 
 if(WIN32)

@@ -557,7 +557,7 @@ rpc_init_prog(int proto, guint32 prog, int ett, size_t nvers,
 				    proc->strptr);
 
 				/* Abort out if desired - but don't throw an exception here! */
-				if (getenv("WIRESHARK_ABORT_ON_DISSECTOR_BUG") != NULL)
+				if (wireshark_abort_on_dissector_bug)
 					REPORT_DISSECTOR_BUG("RPC: No call handler!");
 
 				continue;
@@ -572,7 +572,7 @@ rpc_init_prog(int proto, guint32 prog, int ett, size_t nvers,
 				    proc->strptr);
 
 				/* Abort out if desired - but don't throw an exception here! */
-				if (getenv("WIRESHARK_ABORT_ON_DISSECTOR_BUG") != NULL)
+				if (wireshark_abort_on_dissector_bug)
 					REPORT_DISSECTOR_BUG("RPC: No reply handler!");
 
 				continue;
@@ -4063,7 +4063,7 @@ proto_register_rpc(void)
 			NULL, RPC_RM_FRAGLEN, NULL, HFILL }},
 		{ &hf_rpc_xid, {
 			"XID", "rpc.xid", FT_UINT32, BASE_HEX_DEC,
-			NULL, 0, NULL, HFILL }},
+			NULL, 0, "Transaction identifier", HFILL }},
 		{ &hf_rpc_msgtype, {
 			"Message Type", "rpc.msgtyp", FT_UINT32, BASE_DEC,
 			VALS(rpc_msg_type), 0, NULL, HFILL }},

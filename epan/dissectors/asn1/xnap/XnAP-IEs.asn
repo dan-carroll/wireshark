@@ -1,4 +1,4 @@
--- 3GPP TS 38.423 V15.4.0 (2019-07)
+-- 3GPP TS 38.423 V15.6.0 (2019-12)
 -- 9.3.5	Information Element definitions
 -- **************************************************************
 --
@@ -17,7 +17,11 @@ BEGIN
 IMPORTS
 
 
+	id-CNTypeRestrictionsForEquivalent,
+	id-CNTypeRestrictionsForServing,
 	id-Additional-UL-NG-U-TNLatUPF-List,
+	id-DefaultDRB-Allowed,
+	id-EndpointIPAddressAndPort,
 	id-SecondarydataForwardingInfoFromTarget-List,
 	id-LastE-UTRANPLMNIdentity,
 	id-MaxIPrate-DL,
@@ -28,6 +32,9 @@ IMPORTS
 	id-BPLMN-ID-Info-NR,
 	id-DRBsNotAdmittedSetupModifyList,
 	id-Secondary-MN-Xn-U-TNLInfoatM,
+	id-ULForwardingProposal,
+	id-DRB-IDs-takenintouse,
+	id-SplitSessionIndicator,
 	maxEARFCN,
 	maxnoofAllowedAreas,
 	maxnoofAMFRegions,
@@ -382,6 +389,7 @@ CPTransportLayerInformation ::= CHOICE {
 }
 
 CPTransportLayerInformation-ExtIEs XNAP-PROTOCOL-IES ::= {
+	{ ID id-EndpointIPAddressAndPort		CRITICALITY reject	TYPE EndpointIPAddressAndPort		PRESENCE mandatory},
 	...
 }
 
@@ -444,7 +452,8 @@ XnUAddressInfoperPDUSession-Item ::= SEQUENCE {
 }
 
 XnUAddressInfoperPDUSession-Item-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
-{ ID id-SecondarydataForwardingInfoFromTarget-List	CRITICALITY ignore	EXTENSION SecondarydataForwardingInfoFromTarget-List	PRESENCE optional},
+{ ID id-SecondarydataForwardingInfoFromTarget-List	CRITICALITY ignore	EXTENSION SecondarydataForwardingInfoFromTarget-List	PRESENCE optional}|
+{ ID id-DRB-IDs-takenintouse						CRITICALITY reject	EXTENSION DRB-List												PRESENCE optional},
 	...
 }
 
@@ -500,6 +509,7 @@ QoSFLowsToBeForwarded-Item ::= SEQUENCE {
 }
 
 QoSFLowsToBeForwarded-Item-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
+{ ID id-ULForwardingProposal	CRITICALITY ignore EXTENSION ULForwardingProposal	 PRESENCE optional },
 	...
 }
 
@@ -541,6 +551,7 @@ DeliveryStatus	::= INTEGER (0..4095, ...)
 
 DesiredActNotificationLevel	::= ENUMERATED {none, qos-flow, pdu-session, ue-level, ...}
 
+DefaultDRB-Allowed ::= ENUMERATED {true, false, ...}
 
 DLForwarding	::= ENUMERATED {dl-forwarding-proposed, ...}
 
@@ -695,7 +706,8 @@ E-UTRAPRACHConfiguration ::= SEQUENCE {
 	zeroCorrelationIndex					INTEGER (0..15),
 	highSpeedFlag							ENUMERATED {true, false, ...},
 	prach-FreqOffset						INTEGER (0..94),
-	prach-ConfigIndex						INTEGER (0..63)								OPTIONAL, -- present for TDD --
+	prach-ConfigIndex						INTEGER (0..63)								OPTIONAL, 
+-- C-ifTDD: This IE shall be present if the EUTRA-Mode-Info IE in the Served Cell Information IE is set to the value “TDD” --
 	iE-Extensions							ProtocolExtensionContainer { {E-UTRAPRACHConfiguration-ExtIEs} }	OPTIONAL,
 	...
 }
@@ -706,6 +718,16 @@ E-UTRAPRACHConfiguration-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
 
 
 E-UTRATransmissionBandwidth ::= ENUMERATED {bw6, bw15, bw25, bw50, bw75, bw100, ..., bw1}
+
+EndpointIPAddressAndPort ::=SEQUENCE {
+	endpointIPAddress 				TransportLayerAddress,
+	portNumber						PortNumber,
+	iE-Extensions					ProtocolExtensionContainer { { EndpointIPAddressAndPort-ExtIEs} } OPTIONAL
+}
+
+EndpointIPAddressAndPort-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
+	...
+}
 
 EventType ::= ENUMERATED {
 	report-upon-change-of-serving-cell,
@@ -1082,10 +1104,29 @@ MobilityRestrictionList ::= SEQUENCE {
 }
 
 MobilityRestrictionList-ExtIEs XNAP-PROTOCOL-EXTENSION ::={ 
-{ ID id-LastE-UTRANPLMNIdentity					CRITICALITY ignore	EXTENSION PLMN-Identity									PRESENCE optional		},
+{ ID id-LastE-UTRANPLMNIdentity					CRITICALITY ignore	EXTENSION PLMN-Identity									PRESENCE optional		}|
+{ ID id-CNTypeRestrictionsForServing			CRITICALITY ignore	EXTENSION CNTypeRestrictionsForServing				PRESENCE optional		}|
+{ ID id-CNTypeRestrictionsForEquivalent			CRITICALITY ignore	EXTENSION CNTypeRestrictionsForEquivalent			PRESENCE optional		},
 	...
 }
 
+CNTypeRestrictionsForEquivalent ::= SEQUENCE (SIZE(1..maxnoofEPLMNs)) OF CNTypeRestrictionsForEquivalentItem
+
+CNTypeRestrictionsForEquivalentItem ::= SEQUENCE {
+	plmn-Identity						PLMN-Identity,
+	cn-Type								ENUMERATED {epc-forbidden, fiveGC-forbidden, ...},
+	iE-Extensions						ProtocolExtensionContainer { {CNTypeRestrictionsForEquivalentItem-ExtIEs} }				OPTIONAL,
+	...
+}
+
+CNTypeRestrictionsForEquivalentItem-ExtIEs XNAP-PROTOCOL-EXTENSION ::={
+	...
+}
+
+CNTypeRestrictionsForServing ::= ENUMERATED {
+	epc-forbidden,
+	...
+}
 
 RAT-RestrictionsList ::= SEQUENCE (SIZE(1..maxnoofPLMNs)) OF RAT-RestrictionsItem
 
@@ -1125,8 +1166,8 @@ ServiceAreaList ::= SEQUENCE (SIZE(1..maxnoofPLMNs)) OF ServiceAreaItem
 
 ServiceAreaItem ::= SEQUENCE {
 	plmn-Identity						PLMN-Identity,
-	allowed-TACs-ServiceArea			SEQUENCE (SIZE(1..maxnoofAllowedAreas)) OF TAC,
-	not-allowed-TACs-ServiceArea		SEQUENCE (SIZE(1..maxnoofAllowedAreas)) OF TAC,
+	allowed-TACs-ServiceArea			SEQUENCE (SIZE(1..maxnoofAllowedAreas)) OF TAC		OPTIONAL,
+	not-allowed-TACs-ServiceArea		SEQUENCE (SIZE(1..maxnoofAllowedAreas)) OF TAC		OPTIONAL,
 	iE-Extensions		ProtocolExtensionContainer { {ServiceAreaItem-ExtIEs} }				OPTIONAL,
 	...
 }
@@ -1536,6 +1577,7 @@ PDUSession-List-withDataForwardingFromTarget-Item ::= SEQUENCE {
 }
 
 PDUSession-List-withDataForwardingFromTarget-Item-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
+	{ ID id-DRB-IDs-takenintouse		CRITICALITY reject	EXTENSION DRB-List	PRESENCE optional},
 	...
 }
 
@@ -1672,7 +1714,9 @@ PDUSessionResourceSetupInfo-SNterminated ::= SEQUENCE {
 
 PDUSessionResourceSetupInfo-SNterminated-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
 	{ ID id-SecurityResult						CRITICALITY reject	EXTENSION SecurityResult							PRESENCE optional}|
-	{ ID id-PDUSessionCommonNetworkInstance		CRITICALITY ignore	EXTENSION PDUSessionCommonNetworkInstance		PRESENCE optional},
+	{ ID id-PDUSessionCommonNetworkInstance		CRITICALITY ignore	EXTENSION PDUSessionCommonNetworkInstance		PRESENCE optional}|
+	{ID id-DefaultDRB-Allowed					CRITICALITY ignore	EXTENSION DefaultDRB-Allowed						PRESENCE optional}|
+	{ ID id-SplitSessionIndicator				CRITICALITY reject	EXTENSION SplitSessionIndicator					PRESENCE optional},
 	...
 }
 
@@ -1855,7 +1899,8 @@ PDUSessionResourceModificationInfo-SNterminated ::= SEQUENCE {
 }
 
 PDUSessionResourceModificationInfo-SNterminated-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
-	{ ID id-PDUSessionCommonNetworkInstance		CRITICALITY ignore	EXTENSION PDUSessionCommonNetworkInstance		PRESENCE optional},
+	{ ID id-PDUSessionCommonNetworkInstance		CRITICALITY ignore	EXTENSION PDUSessionCommonNetworkInstance		PRESENCE optional}|
+	{ID id-DefaultDRB-Allowed					CRITICALITY ignore	EXTENSION DefaultDRB-Allowed						PRESENCE optional},
 
 	...
 }
@@ -1879,8 +1924,8 @@ DRBsToBeModified-List-Modified-SNterminated ::= SEQUENCE (SIZE(1..maxnoofDRBs)) 
 
 DRBsToBeModified-List-Modified-SNterminated-Item ::= SEQUENCE {
 	drb-ID									DRB-ID,
-	mN-DL-PDCP-UP-TNLInfo					UPTransportParameters		OPTIONAL,
-	secondary-MN-DL-PDCP-UP-TNLInfo			UPTransportParameters		OPTIONAL,
+	mN-DL-SCG-UP-TNLInfo					UPTransportParameters		OPTIONAL,
+	secondary-MN-DL-SCG-UP-TNLInfo			UPTransportParameters		OPTIONAL,
 	lCID									LCID						OPTIONAL,
 	rlc-status								RLC-Status					OPTIONAL,
 	iE-Extensions					ProtocolExtensionContainer { {DRBsToBeModified-List-Modified-SNterminated-Item-ExtIEs} } 	OPTIONAL,
@@ -1912,6 +1957,7 @@ PDUSessionResourceModificationResponseInfo-SNterminated ::= SEQUENCE {
 }
 
 PDUSessionResourceModificationResponseInfo-SNterminated-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
+	{ ID id-DRB-IDs-takenintouse		CRITICALITY reject	EXTENSION DRB-List	PRESENCE optional},
 	...
 }
 
@@ -2040,6 +2086,7 @@ PDUSessionResourceChangeConfirmInfo-SNterminated ::= SEQUENCE {
 }
 
 PDUSessionResourceChangeConfirmInfo-SNterminated-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
+	{ ID id-DRB-IDs-takenintouse	CRITICALITY reject	EXTENSION DRB-List	PRESENCE optional},
 	...
 }
 
@@ -2185,6 +2232,7 @@ PDUSessionResourceModConfirmInfo-SNterminated ::= SEQUENCE {
 }
 
 PDUSessionResourceModConfirmInfo-SNterminated-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
+	{ ID id-DRB-IDs-takenintouse		CRITICALITY reject	EXTENSION DRB-List	PRESENCE optional},
 	...
 }
 
@@ -2326,6 +2374,7 @@ PDUSessionCommonNetworkInstance	::= OCTET STRING
 
 PLMN-Identity ::= OCTET STRING (SIZE(3))
 
+PortNumber ::= BIT STRING (SIZE (16))
 
 PriorityLevelQoS ::= INTEGER (1..127, ...)
 
@@ -3027,6 +3076,12 @@ SliceSupport-List	::= SEQUENCE (SIZE(1..maxnoofSliceItems)) OF S-NSSAI
 
 S-NG-RANnode-SecurityKey ::= BIT STRING (SIZE(256))
 
+S-NG-RANnode-Addition-Trigger-Ind ::= ENUMERATED {
+	sn-change,
+	inter-MN-HO,
+	intra-MN-HO,
+	...
+}
 
 S-NSSAI ::= SEQUENCE {
 	sst						OCTET STRING (SIZE(1)),
@@ -3071,6 +3126,10 @@ SpecialSubframePatterns-E-UTRA ::= ENUMERATED {
 
 SpectrumSharingGroupID ::= INTEGER (1..maxnoofCellsinNG-RANnode)
 
+SplitSessionIndicator ::= ENUMERATED {
+	split,
+	...
+}
 
 SplitSRBsTypes ::= ENUMERATED {srb1, srb2, srb1and2, ...}
 
@@ -3396,6 +3455,8 @@ ULConfiguration-ExtIEs XNAP-PROTOCOL-EXTENSION ::= {
 UL-UE-Configuration::= ENUMERATED {no-data, shared, only, ...}
 
 ULForwarding	::= ENUMERATED {ul-forwarding-proposed, ...}
+
+ULForwardingProposal	::= ENUMERATED {ul-forwarding-proposed, ...}
 
 UPTransportLayerInformation ::= CHOICE {
 	gtpTunnel					GTPtunnelTransportLayerInformation,

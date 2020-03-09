@@ -40,6 +40,7 @@
 #include <epan/packet.h>
 #include <epan/tap.h>
 #include <epan/expert.h>
+#include <epan/proto_data.h>
 #include "packet-ber.h"
 #include "packet-gsm_a_common.h"
 #include "packet-ppp.h"
@@ -516,7 +517,6 @@ static int hf_gsm_a_rr_start_mode = -1;
 static int hf_gsm_a_rr_timing_adv = -1;
 static int hf_gsm_a_rr_time_diff = -1;
 static int hf_gsm_a_rr_tlli = -1;
-static int hf_gsm_a_rr_tmsi_ptmsi = -1;
 static int hf_gsm_a_rr_target_mode = -1;
 static int hf_gsm_a_rr_wait_indication = -1;
 static int hf_gsm_a_rr_seq_code = -1;
@@ -557,6 +557,7 @@ static int hf_gsm_a_rr_apdu_id = -1;
 static int hf_gsm_a_rr_apdu_flags_cr = -1;
 static int hf_gsm_a_rr_apdu_flags_fs = -1;
 static int hf_gsm_a_rr_apdu_flags_ls = -1;
+static int hf_gsm_a_rr_apdu_data = -1;
 static int hf_gsm_a_rr_set_of_amr_codec_modes_v1_b8 = -1;
 static int hf_gsm_a_rr_set_of_amr_codec_modes_v1_b7 = -1;
 static int hf_gsm_a_rr_set_of_amr_codec_modes_v1_b6 = -1;
@@ -1224,6 +1225,7 @@ static gint ett_ccch_msg = -1;
 static gint ett_ec_ccch_msg = -1;
 static gint ett_ccch_oct_1 = -1;
 static gint ett_sacch_msg = -1;
+static gint ett_apdu = -1;
 
 static expert_field ei_gsm_a_rr_ie_overrun = EI_INIT;
 static expert_field ei_gsm_a_rr_ie_underrun = EI_INIT;
@@ -8631,7 +8633,7 @@ de_rr_tmsi_ptmsi(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_, guint3
     subtree = proto_tree_add_subtree(tree, tvb, curr_offset, 3, ett_gsm_rr_elem[DE_RR_TMSI_PTMSI], NULL,
                                val_to_str_ext_const(DE_RR_TMSI_PTMSI, &gsm_rr_elem_strings_ext, ""));
 
-    proto_tree_add_item(subtree, hf_gsm_a_rr_tmsi_ptmsi, tvb, curr_offset, 4, ENC_BIG_ENDIAN);
+    proto_tree_add_item(subtree, hf_gsm_a_tmsi, tvb, curr_offset, 4, ENC_BIG_ENDIAN);
     curr_offset = curr_offset + 4;
 
     return(curr_offset - offset);
@@ -8780,12 +8782,15 @@ de_rr_sus_cau(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_, guint32 o
  */
 static const value_string gsm_a_rr_apdu_id_vals[] = {
     { 0, "RRLP (GSM 04.31) LCS" },
+    { 1, "ETWS (3GPP TS 23.041)" },
     { 0, NULL },
 };
 static guint16
 de_rr_apdu_id(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_, guint32 offset, guint len _U_, gchar *add_string _U_, int string_len _U_)
 {
-    proto_tree_add_item(tree, hf_gsm_a_rr_apdu_id, tvb, offset, 1, ENC_BIG_ENDIAN);
+    guint32 *ppi = wmem_new(pinfo->pool, guint32);
+    proto_tree_add_item_ret_uint(tree, hf_gsm_a_rr_apdu_id, tvb, offset, 1, ENC_BIG_ENDIAN, ppi);
+    p_add_proto_data(pinfo->pool, pinfo, proto_a_rr, pinfo->curr_layer_num, ppi);
 
     return 0;
 }
@@ -8823,12 +8828,18 @@ de_rr_apdu_flags(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_, guint3
 static guint16
 de_rr_apdu_data(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_, guint32 offset, guint len, gchar *add_string _U_, int string_len _U_)
 {
+    proto_item *apdu_pi;
+    proto_tree *apdu_tree;
     tvbuff_t *sub_tvb;
+    guint32 *ppi;
 
+    apdu_pi = proto_tree_add_item(tree, hf_gsm_a_rr_apdu_data, tvb, offset, len, ENC_NA);
+    apdu_tree = proto_item_add_subtree(apdu_pi, ett_apdu);
     sub_tvb = tvb_new_subset_length(tvb, offset, len);
 
-    if (rrlp_dissector)
-        call_dissector(rrlp_dissector, sub_tvb,pinfo, tree);
+    ppi = (guint32 *) p_get_proto_data(pinfo->pool, pinfo, proto_a_rr, pinfo->curr_layer_num);
+    if (ppi && *ppi == 0 && rrlp_dissector)
+        call_dissector(rrlp_dissector, sub_tvb,pinfo, apdu_tree);
 
     return len;
 }
@@ -11623,7 +11634,7 @@ dtap_rr_ec_paging_req(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_, g
     }
     else
     { /* P-TMSI*/
-        proto_tree_add_bits_item(tree, hf_gsm_a_rr_tmsi_ptmsi, tvb, curr_bit_offset, 32, ENC_BIG_ENDIAN);
+        proto_tree_add_bits_item(tree, hf_gsm_a_tmsi, tvb, curr_bit_offset, 32, ENC_BIG_ENDIAN);
         curr_bit_offset += 32;
     }
 
@@ -11635,7 +11646,7 @@ dtap_rr_ec_paging_req(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_, g
         }
         else
         { /* P-TMSI*/
-            proto_tree_add_bits_item(tree, hf_gsm_a_rr_tmsi_ptmsi, tvb, curr_bit_offset, 32, ENC_BIG_ENDIAN);
+            proto_tree_add_bits_item(tree, hf_gsm_a_tmsi, tvb, curr_bit_offset, 32, ENC_BIG_ENDIAN);
         }
     }
 
@@ -12460,11 +12471,6 @@ proto_register_gsm_a_rr(void)
                 FT_UINT32,BASE_HEX,  NULL, 0x0,
                 NULL, HFILL }
             },
-            { &hf_gsm_a_rr_tmsi_ptmsi,
-              { "TMSI/P-TMSI Value","gsm_a.rr.tmsi_ptmsi",
-                FT_UINT32,BASE_HEX,  NULL, 0x0,
-                NULL, HFILL }
-            },
             { &hf_gsm_a_rr_target_mode,
               { "Target mode","gsm_a.rr.target_mode",
                 FT_UINT8,BASE_DEC,  NULL, 0xc0,
@@ -12664,6 +12670,11 @@ proto_register_gsm_a_rr(void)
             { &hf_gsm_a_rr_apdu_flags_ls,
               { "Last Segment", "gsm_a.rr.apdu_flags_ls",
                 FT_BOOLEAN, 8, TFS(&gsm_a_rr_apdu_flags_ls_value), 0x40,
+                NULL, HFILL }
+            },
+            { &hf_gsm_a_rr_apdu_data,
+              { "APDU Data","gsm_a.rr.apdu_data",
+                FT_BYTES, BASE_NONE, NULL, 0,
                 NULL, HFILL }
             },
             { &hf_gsm_a_rr_set_of_amr_codec_modes_v1_b8,
@@ -14074,7 +14085,7 @@ proto_register_gsm_a_rr(void)
                 NULL, HFILL }
             },
             { &hf_gsm_a_rr_feat_ind_ps_ir,
-              { "pS IR","gsm_a.rr.feature_indicator.cs_ir",
+              { "PS IR","gsm_a.rr.feature_indicator.ps_ir",
                 FT_BOOLEAN, BASE_NONE, TFS(&gsm_a_rr_feat_ind_ps_ir), 0x00,
                 NULL, HFILL }
             },
@@ -14441,7 +14452,7 @@ proto_register_gsm_a_rr(void)
             { &hf_gsm_a_rr_pan_bits_present, { "PAN bits", "gsm_a.rr.pan_bits_present", FT_BOOLEAN, BASE_NONE, TFS(&tfs_present_not_present), 0x00, NULL, HFILL }},
             { &hf_gsm_a_rr_optional_extensions_present, { "Optional Extensions", "gsm_a.rr.optional_extensions_present", FT_BOOLEAN, BASE_NONE, TFS(&tfs_present_not_present), 0x00, NULL, HFILL }},
             { &hf_gsm_a_rr_egprs_supported, { "EGPRS", "gsm_a.rr.egprs_supported", FT_BOOLEAN, BASE_NONE, TFS(&tfs_supported_not_supported_by_cell), 0x00, NULL, HFILL }},
-            { &hf_gsm_a_rr_access_tech_req, { "MBMS procedures", "gsm_a.rr.access_tech_req", FT_BOOLEAN, BASE_NONE, TFS(&tfs_present_not_present), 0x00, NULL, HFILL }},
+            { &hf_gsm_a_rr_access_tech_req, { "Access Technologies Request", "gsm_a.rr.access_tech_req", FT_BOOLEAN, BASE_NONE, TFS(&tfs_present_not_present), 0x00, NULL, HFILL }},
             { &hf_gsm_a_rr_tfi_multiblock, { "TFI/Multiblock", "gsm_a.rr.tfi_multiblock", FT_BOOLEAN, BASE_NONE, TFS(&tfs_tfi_multi_block_allocation_present), 0x00, NULL, HFILL }},
             { &hf_gsm_a_rr_tfi_allocation_type, { "Allocation Type", "gsm_a.rr.tfi_allocation_type", FT_BOOLEAN, BASE_NONE, TFS(&tfs_fixed_dynamic_allocation), 0x00, NULL, HFILL }},
             { &hf_gsm_a_rr_p0_present, { "P0", "gsm_a.rr.p0_present", FT_BOOLEAN, BASE_NONE, TFS(&tfs_present_not_present), 0x00, NULL, HFILL }},
@@ -14699,7 +14710,7 @@ proto_register_gsm_a_rr(void)
         };
 
     /* Setup protocol subtree array */
-#define NUM_INDIVIDUAL_ELEMS    4
+#define NUM_INDIVIDUAL_ELEMS    5
     gint *ett[NUM_INDIVIDUAL_ELEMS +
               NUM_GSM_DTAP_MSG_RR +
               NUM_GSM_RR_ELEM +
@@ -14721,6 +14732,7 @@ proto_register_gsm_a_rr(void)
     ett[1] = &ett_ccch_oct_1;
     ett[2] = &ett_sacch_msg;
     ett[3] = &ett_ec_ccch_msg;
+    ett[4] = &ett_apdu;
 
     last_offset = NUM_INDIVIDUAL_ELEMS;
 

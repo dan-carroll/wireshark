@@ -521,7 +521,7 @@ new_stat_node(stats_tree *st, const gchar *name, int parent_id, stat_node_dataty
     }
 
     if(node->parent->hash) {
-        g_hash_table_insert(node->parent->hash,node->name,node);
+        g_hash_table_replace(node->parent->hash,node->name,node);
     }
 
     if (st->cfg->setup_node_pr) {
@@ -1066,17 +1066,17 @@ stats_tree_get_column_name (gint col_index)
         case COL_AVERAGE:
             return "Average";
         case COL_MIN:
-            return "Min val";
+            return "Min Val";
         case COL_MAX:
-            return "Max val";
+            return "Max Val";
         case COL_RATE:
             return "Rate (ms)";
         case COL_PERCENT:
             return "Percent";
         case COL_BURSTRATE:
-            return prefs.st_burst_showcount?"Burst count":"Burst rate";
+            return prefs.st_burst_showcount ? "Burst Count" : "Burst Rate";
         case COL_BURSTTIME:
-            return "Burst start";
+            return "Burst Start";
         default:
             return "(Unknown)";
     }

@@ -18,7 +18,6 @@
 #include <ctype.h>
 #include <errno.h>
 
-#include <wsutil/tempfile.h>
 #include <wsutil/file_util.h>
 #include <wsutil/filesystem.h>
 #include <wsutil/json_dumper.h>
@@ -846,7 +845,7 @@ cf_continue_tail(capture_file *cf, volatile int to_read, wtap_rec *rec,
   /* With the new packet list the first packet
    * isn't automatically selected.
    */
-  if (!cf->current_frame)
+  if (!cf->current_frame && !packet_list_multi_select_active())
     packet_list_select_first_row();
 
   /* moving to the end of the packet list - if the user requested so and
@@ -1373,7 +1372,7 @@ merge_callback(merge_event event, int num _U_,
 
 cf_status_t
 cf_merge_files_to_tempfile(gpointer pd_window, char **out_filenamep,
-                           int in_file_count, char *const *in_filenames,
+                           int in_file_count, const char *const *in_filenames,
                            int file_type, gboolean do_append)
 {
   int                        err      = 0;
@@ -1393,7 +1392,7 @@ cf_merge_files_to_tempfile(gpointer pd_window, char **out_filenamep,
 
   /* merge the files */
   status = merge_files_to_tempfile(out_filenamep, "wireshark", file_type,
-                                   (const char *const *) in_filenames,
+                                   in_filenames,
                                    in_file_count, do_append,
                                    IDB_MERGE_MODE_ALL_SAME, 0 /* snaplen */,
                                    "Wireshark", &cb, &err, &err_info,
@@ -1560,6 +1559,20 @@ cf_read_record(capture_file *cf, const frame_data *fdata,
 
   if (!wtap_seek_read(cf->provider.wth, fdata->file_off, rec, buf, &err, &err_info)) {
     cfile_read_failure_alert_box(cf->filename, err, err_info);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+gboolean
+cf_read_record_no_alert(capture_file *cf, const frame_data *fdata,
+                        wtap_rec *rec, Buffer *buf)
+{
+  int    err;
+  gchar *err_info;
+
+  if (!wtap_seek_read(cf->provider.wth, fdata->file_off, rec, buf, &err, &err_info)) {
+    g_free(err_info);
     return FALSE;
   }
   return TRUE;

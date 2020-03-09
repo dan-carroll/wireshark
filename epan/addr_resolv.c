@@ -69,13 +69,11 @@
 #include <ws2tcpip.h>
 #endif
 
-#ifdef HAVE_C_ARES
-# ifdef _WIN32
-#  define socklen_t unsigned int
-# endif
-# include <ares.h>
-# include <ares_version.h>
-#endif  /* HAVE_C_ARES */
+#ifdef _WIN32
+# define socklen_t unsigned int
+#endif
+#include <ares.h>
+#include <ares_version.h>
 
 #include <glib.h>
 
@@ -94,6 +92,7 @@
 #include <epan/to_str-int.h>
 #include <epan/maxmind_db.h>
 #include <epan/prefs.h>
+#include <epan/uat.h>
 
 #define ENAME_HOSTS     "hosts"
 #define ENAME_SUBNETS   "subnets"
@@ -206,20 +205,9 @@ static wmem_map_t *ipv6_hash_table = NULL;
 static wmem_map_t *vlan_hash_table = NULL;
 static wmem_map_t *ss7pc_hash_table = NULL;
 
-static wmem_list_t *manually_resolved_ipv4_list = NULL;
-static wmem_list_t *manually_resolved_ipv6_list = NULL;
-
-typedef struct _resolved_ipv4
-{
-    guint32          host_addr;
-    char             name[MAXNAMELEN];
-} resolved_ipv4_t;
-
-typedef struct _resolved_ipv6
-{
-    ws_in6_addr  ip6_addr;
-    char               name[MAXNAMELEN];
-} resolved_ipv6_t;
+// Maps IP address -> manually set hostname.
+static wmem_map_t *manually_resolved_ipv4_list = NULL;
+static wmem_map_t *manually_resolved_ipv6_list = NULL;
 
 static addrinfo_lists_t addrinfo_lists = { NULL, NULL};
 
@@ -294,10 +282,8 @@ e_addr_resolve gbl_resolv_flags = {
     FALSE,  /* vlan_name */
     FALSE   /* ss7 point code names */
 };
-#ifdef HAVE_C_ARES
 static guint name_resolve_concurrency = 500;
 static gboolean resolve_synchronously = FALSE;
-#endif
 
 /*
  *  Global variables (can be changed in GUI sections)
@@ -319,8 +305,6 @@ gchar *g_enterprises_path = NULL;   /* global enterprises file   */
 gchar *g_penterprises_path = NULL;  /* personal enterprises file */
                                     /* first resolving call   */
 
-/* c-ares */
-#ifdef HAVE_C_ARES
 /*
  * Submitted asynchronous queries trigger a callback (c_ares_ghba_cb()).
  * Queries are added to c_ares_queue_head. During processing, queries are
@@ -364,6 +348,52 @@ static ares_channel ghbn_chan; /* ares_gethostbyname -- Usually interactive, tim
 static  gboolean  async_dns_initialized = FALSE;
 static  guint       async_dns_in_flight = 0;
 static  wmem_list_t *async_dns_queue_head = NULL;
+
+//UAT for providing a list of DNS servers to C-ARES for name resolution
+gboolean use_custom_dns_server_list = FALSE;
+struct dns_server_data {
+    char *ipaddr;
+};
+
+UAT_CSTRING_CB_DEF(dnsserverlist_uats, ipaddr, struct dns_server_data)
+
+static uat_t *dnsserver_uat = NULL;
+static struct dns_server_data  *dnsserverlist_uats = NULL;
+static guint ndnsservers = 0;
+
+static void
+dns_server_free_cb(void *data)
+{
+    struct dns_server_data *h = (struct dns_server_data*)data;
+
+    g_free(h->ipaddr);
+}
+
+static void*
+dns_server_copy_cb(void *dst_, const void *src_, size_t len _U_)
+{
+    const struct dns_server_data *src = (const struct dns_server_data *)src_;
+    struct dns_server_data       *dst = (struct dns_server_data *)dst_;
+
+    dst->ipaddr = g_strdup(src->ipaddr);
+
+    return dst;
+}
+
+static gboolean
+dnsserver_uat_fld_ip_chk_cb(void* r _U_, const char* ipaddr, guint len _U_, const void* u1 _U_, const void* u2 _U_, char** err)
+{
+    //Check for a valid IPv4 or IPv6 address.
+    if (ipaddr && g_hostname_is_ip_address(ipaddr)) {
+        *err = NULL;
+        return TRUE;
+    }
+
+    *err = g_strdup_printf("No valid IP address given.");
+    return FALSE;
+}
+
+
 
 static void
 c_ares_ghba_sync_cb(void *arg, int status, int timeouts _U_, struct hostent *he) {
@@ -504,13 +534,62 @@ set_resolution_synchrony(gboolean synchronous)
 {
     resolve_synchronously = synchronous;
 }
-#else
-void
-set_resolution_synchrony(gboolean synchronous _U_)
+
+static void
+c_ares_set_dns_servers(void)
 {
-    /* Nothing to set. */
+    if ((!async_dns_initialized) || (!use_custom_dns_server_list))
+        return;
+
+    if (ndnsservers == 0) {
+        //clear the list of servers.  This may effectively disable name resolution
+        ares_set_servers(ghba_chan, NULL);
+        ares_set_servers(ghbn_chan, NULL);
+    } else {
+        struct ares_addr_node* servers = wmem_alloc_array(NULL, struct ares_addr_node, ndnsservers);
+        ws_in4_addr ipv4addr;
+        ws_in6_addr ipv6addr;
+        gboolean invalid_IP_found = FALSE;
+        struct ares_addr_node* server;
+        guint i;
+        for (i = 0, server = servers; i < ndnsservers-1; i++, server++) {
+            if (ws_inet_pton6(dnsserverlist_uats[i].ipaddr, &ipv6addr)) {
+                server->family = AF_INET6;
+                memcpy(&server->addr.addr6, &ipv6addr, 16);
+            } else if (ws_inet_pton4(dnsserverlist_uats[i].ipaddr, &ipv4addr)) {
+                server->family = AF_INET;
+                memcpy(&server->addr.addr4, &ipv4addr, 4);
+            } else {
+                //This shouldn't happen, but just in case...
+                invalid_IP_found = TRUE;
+                server->family = 0;
+                memset(&server->addr.addr4, 0, 4);
+                break;
+            }
+
+            server->next = (server+1);
+        }
+        if (!invalid_IP_found) {
+            if (ws_inet_pton6(dnsserverlist_uats[i].ipaddr, &ipv6addr)) {
+                server->family = AF_INET6;
+                memcpy(&server->addr.addr6, &ipv6addr, 16);
+            }
+            else if (ws_inet_pton4(dnsserverlist_uats[i].ipaddr, &ipv4addr)) {
+                server->family = AF_INET;
+                memcpy(&server->addr.addr4, &ipv4addr, 4);
+            } else {
+                //This shouldn't happen, but just in case...
+                server->family = 0;
+                memset(&server->addr.addr4, 0, 4);
+            }
+        }
+        server->next = NULL;
+
+        ares_set_servers(ghba_chan, servers);
+        ares_set_servers(ghbn_chan, servers);
+        wmem_free(NULL, servers);
+    }
 }
-#endif /* HAVE_C_ARES */
 
 typedef struct {
     guint32      mask;
@@ -929,8 +1008,6 @@ fill_dummy_ip6(hashipv6_t* volatile tp)
     g_strlcpy(tp->name, tp->ip6, MAXNAMELEN);
 }
 
-#ifdef HAVE_C_ARES
-
 static void
 c_ares_ghba_cb(void *arg, int status, int timeouts _U_, struct hostent *he) {
     async_dns_queue_msg_t *caqm = (async_dns_queue_msg_t *)arg;
@@ -957,7 +1034,6 @@ c_ares_ghba_cb(void *arg, int status, int timeouts _U_, struct hostent *he) {
     }
     wmem_free(wmem_epan_scope(), caqm);
 }
-#endif /* HAVE_C_ARES */
 
 /* --------------- */
 static hashipv4_t *
@@ -1000,7 +1076,6 @@ host_lookup(const guint addr)
     if (gbl_resolv_flags.use_external_net_name_resolver) {
         tp->flags |= TRIED_RESOLVE_ADDRESS;
 
-#ifdef HAVE_C_ARES
         if (async_dns_initialized) {
             /* c-ares is initialized, so we can use it */
             if (resolve_synchronously || name_resolve_concurrency == 0) {
@@ -1024,7 +1099,6 @@ host_lookup(const guint addr)
                 wmem_list_append(async_dns_queue_head, (gpointer) caqm);
             }
         }
-#endif
     }
 
     return tp;
@@ -1077,7 +1151,6 @@ host_lookup6(const ws_in6_addr *addr)
     if (gbl_resolv_flags.use_external_net_name_resolver) {
         tp->flags |= TRIED_RESOLVE_ADDRESS;
 
-#ifdef HAVE_C_ARES
         if (async_dns_initialized) {
             /* c-ares is initialized, so we can use it */
             if (resolve_synchronously || name_resolve_concurrency == 0) {
@@ -1101,7 +1174,6 @@ host_lookup6(const ws_in6_addr *addr)
                 wmem_list_append(async_dns_queue_head, (gpointer) caqm);
             }
         }
-#endif
     }
 
     return tp;
@@ -2242,8 +2314,7 @@ add_ip_name_from_string (const char *addr, const char *name)
         ws_in6_addr ip6_addr;
     } host_addr;
     gboolean is_ipv6;
-    resolved_ipv4_t *resolved_ipv4_entry;
-    resolved_ipv6_t *resolved_ipv6_entry;
+    resolved_name_t *resolved_entry;
 
     if (ws_inet_pton6(addr, &host_addr.ip6_addr)) {
         is_ipv6 = TRUE;
@@ -2254,19 +2325,58 @@ add_ip_name_from_string (const char *addr, const char *name)
     }
 
     if (is_ipv6) {
-        resolved_ipv6_entry = wmem_new(wmem_epan_scope(), resolved_ipv6_t);
-        memcpy(&(resolved_ipv6_entry->ip6_addr), &host_addr.ip6_addr, 16);
-        g_strlcpy(resolved_ipv6_entry->name, name, MAXNAMELEN);
-        wmem_list_prepend(manually_resolved_ipv6_list, resolved_ipv6_entry);
+        resolved_entry = (resolved_name_t*)wmem_map_lookup(manually_resolved_ipv6_list, &host_addr.ip6_addr);
+        if (resolved_entry)
+        {
+            // If we found a previous matching key (IP address), then just update the value (custom hostname);
+            g_strlcpy(resolved_entry->name, name, MAXNAMELEN);
+        }
+        else
+        {
+            // Add a new mapping entry, if this IP address isn't already in the list.
+            ws_in6_addr* addr_key = wmem_new(wmem_epan_scope(), ws_in6_addr);
+            memcpy(addr_key, &host_addr.ip6_addr, sizeof(ws_in6_addr));
+
+            resolved_entry = wmem_new(wmem_epan_scope(), resolved_name_t);
+            g_strlcpy(resolved_entry->name, name, MAXNAMELEN);
+
+            wmem_map_insert(manually_resolved_ipv6_list, addr_key, resolved_entry);
+        }
     } else {
-        resolved_ipv4_entry = wmem_new(wmem_epan_scope(), resolved_ipv4_t);
-        resolved_ipv4_entry->host_addr = host_addr.ip4_addr;
-        g_strlcpy(resolved_ipv4_entry->name, name, MAXNAMELEN);
-        wmem_list_prepend(manually_resolved_ipv4_list, resolved_ipv4_entry);
+        resolved_entry = (resolved_name_t*)wmem_map_lookup(manually_resolved_ipv4_list, GUINT_TO_POINTER(host_addr.ip4_addr));
+        if (resolved_entry)
+        {
+            // If we found a previous matching key (IP address), then just update the value (custom hostname);
+            g_strlcpy(resolved_entry->name, name, MAXNAMELEN);
+        }
+        else
+        {
+            // Add a new mapping entry, if this IP address isn't already in the list.
+            resolved_entry = wmem_new(wmem_epan_scope(), resolved_name_t);
+            g_strlcpy(resolved_entry->name, name, MAXNAMELEN);
+
+            wmem_map_insert(manually_resolved_ipv4_list, GUINT_TO_POINTER(host_addr.ip4_addr), resolved_entry);
+        }
     }
 
     return TRUE;
 } /* add_ip_name_from_string */
+
+extern resolved_name_t* get_edited_resolved_name(const char* addr)
+{
+    guint32 ip4_addr;
+    ws_in6_addr ip6_addr;
+    resolved_name_t* resolved_entry = NULL;
+
+    if (ws_inet_pton6(addr, &ip6_addr)) {
+        resolved_entry = (resolved_name_t*)wmem_map_lookup(manually_resolved_ipv6_list, &ip6_addr);
+    }
+    else if (ws_inet_pton4(addr, &ip4_addr)) {
+        resolved_entry = (resolved_name_t*)wmem_map_lookup(manually_resolved_ipv4_list, GUINT_TO_POINTER(ip4_addr));
+    }
+
+    return resolved_entry;
+}
 
 /*
  * Add the resolved addresses that are in use to the list used to create the NRB
@@ -2683,7 +2793,6 @@ addr_resolve_pref_init(module_t *nameres)
             "Whether address/name pairs found in captured DNS packets should be used by Wireshark for name resolution.",
             &gbl_resolv_flags.dns_pkt_addr_resolution);
 
-#ifdef HAVE_C_ARES
     prefs_register_bool_preference(nameres, "use_external_name_resolver",
             "Use an external network name resolver",
             "Use your system's configured name resolver"
@@ -2691,6 +2800,35 @@ addr_resolve_pref_init(module_t *nameres)
             " Only applies when network name resolution"
             " is enabled.",
             &gbl_resolv_flags.use_external_net_name_resolver);
+
+    prefs_register_bool_preference(nameres, "use_custom_dns_servers",
+        "Use custom list of DNS servers for name resolution",
+        "Uses DNS Servers list to resolve network names if TRUE.  If FALSE, default information is used",
+        &use_custom_dns_server_list);
+
+    static uat_field_t dns_server_uats_flds[] = {
+        UAT_FLD_CSTRING_OTHER(dnsserverlist_uats, ipaddr, "IP address", dnsserver_uat_fld_ip_chk_cb, "IPv4 or IPv6 address"),
+        UAT_END_FIELDS
+    };
+
+    dnsserver_uat = uat_new("DNS Servers",
+        sizeof(struct dns_server_data),
+        "addr_resolve_dns_servers",        /* filename */
+        TRUE,                       /* from_profile */
+        &dnsserverlist_uats,        /* data_ptr */
+        &ndnsservers,               /* numitems_ptr */
+        UAT_AFFECTS_DISSECTION,
+        NULL,
+        dns_server_copy_cb,
+        NULL,
+        dns_server_free_cb,
+        c_ares_set_dns_servers,
+        NULL,
+        dns_server_uats_flds);
+    prefs_register_uat_preference(nameres, "dns_servers",
+        "DNS Servers",
+        "A table of IPv4 and IPv6 addresses of DNS servers to be used to resolve IP names and addresses",
+        dnsserver_uat);
 
     prefs_register_obsolete_preference(nameres, "concurrent_dns");
 
@@ -2702,12 +2840,6 @@ addr_resolve_pref_init(module_t *nameres)
             " your DNS server behave badly.",
             10,
             &name_resolve_concurrency);
-#else
-    prefs_register_static_text_preference(nameres, "use_external_name_resolver",
-            "Use an external network name resolver: N/A",
-            "Support for using a concurrent external name resolver was not"
-            " compiled into this version of Wireshark");
-#endif
 
     prefs_register_bool_preference(nameres, "hosts_file_handling",
             "Only use the profile \"hosts\" file",
@@ -2731,6 +2863,11 @@ addr_resolve_pref_init(module_t *nameres)
 
 }
 
+void addr_resolve_pref_apply(void)
+{
+    c_ares_set_dns_servers();
+}
+
 void
 disable_name_resolution(void) {
     gbl_resolv_flags.mac_name                           = FALSE;
@@ -2742,7 +2879,6 @@ disable_name_resolution(void) {
     gbl_resolv_flags.ss7pc_name                         = FALSE;
 }
 
-#ifdef HAVE_C_ARES
 gboolean
 host_name_lookup_process(void) {
     async_dns_queue_msg_t *caqm;
@@ -2807,25 +2943,6 @@ _host_name_lookup_cleanup(void) {
 #endif
     async_dns_initialized = FALSE;
 }
-
-#else
-
-gboolean
-host_name_lookup_process(void) {
-    gboolean nro = new_resolved_objects;
-
-    new_resolved_objects = FALSE;
-
-    nro |= maxmind_db_lookup_process();
-
-    return nro;
-}
-
-static void
-_host_name_lookup_cleanup(void) {
-}
-
-#endif /* HAVE_C_ARES */
 
 const gchar *
 get_hostname(const guint addr)
@@ -2918,30 +3035,28 @@ add_ipv6_name(const ws_in6_addr *addrp, const gchar *name)
 } /* add_ipv6_name */
 
 static void
-add_manually_resolved_ipv4(gpointer data, gpointer user_data _U_)
+add_manually_resolved_ipv4(gpointer key, gpointer value, gpointer user_data _U_)
 {
-    resolved_ipv4_t *resolved_ipv4_entry = (resolved_ipv4_t *)data;
-
-    add_ipv4_name(resolved_ipv4_entry->host_addr, resolved_ipv4_entry->name);
+    resolved_name_t *resolved_ipv4_entry = (resolved_name_t*)value;
+    add_ipv4_name(GPOINTER_TO_UINT(key), resolved_ipv4_entry->name);
 }
 
 static void
-add_manually_resolved_ipv6(gpointer data, gpointer user_data _U_)
+add_manually_resolved_ipv6(gpointer key, gpointer value, gpointer user_data _U_)
 {
-    resolved_ipv6_t *resolved_ipv6_entry = (resolved_ipv6_t *)data;
-
-    add_ipv6_name(&(resolved_ipv6_entry->ip6_addr), resolved_ipv6_entry->name);
+    resolved_name_t *resolved_ipv6_entry = (resolved_name_t*)value;
+    add_ipv6_name((ws_in6_addr*)key, resolved_ipv6_entry->name);
 }
 
 static void
 add_manually_resolved(void)
 {
     if (manually_resolved_ipv4_list) {
-        wmem_list_foreach(manually_resolved_ipv4_list, add_manually_resolved_ipv4, NULL);
+        wmem_map_foreach(manually_resolved_ipv4_list, add_manually_resolved_ipv4, NULL);
     }
 
     if (manually_resolved_ipv6_list) {
-        wmem_list_foreach(manually_resolved_ipv6_list, add_manually_resolved_ipv6, NULL);
+        wmem_map_foreach(manually_resolved_ipv6_list, add_manually_resolved_ipv6, NULL);
     }
 }
 
@@ -2960,16 +3075,14 @@ host_name_lookup_init(void)
     g_assert(ipv6_hash_table == NULL);
     ipv6_hash_table = wmem_map_new(wmem_epan_scope(), ipv6_oat_hash, ipv6_equal);
 
-#ifdef HAVE_C_ARES
     g_assert(async_dns_queue_head == NULL);
     async_dns_queue_head = wmem_list_new(wmem_epan_scope());
-#endif
 
     if (manually_resolved_ipv4_list == NULL)
-        manually_resolved_ipv4_list = wmem_list_new(wmem_epan_scope());
+        manually_resolved_ipv4_list = wmem_map_new(wmem_epan_scope(), g_direct_hash, g_direct_equal);
 
     if (manually_resolved_ipv6_list == NULL)
-        manually_resolved_ipv6_list = wmem_list_new(wmem_epan_scope());
+        manually_resolved_ipv6_list = wmem_map_new(wmem_epan_scope(), ipv6_oat_hash, ipv6_equal);
 
     /*
      * Load the global hosts file, if we have one.
@@ -2989,18 +3102,16 @@ host_name_lookup_init(void)
         report_open_failure(hostspath, errno, FALSE);
     }
     g_free(hostspath);
-#ifdef HAVE_C_ARES
 #ifdef CARES_HAVE_ARES_LIBRARY_INIT
     if (ares_library_init(ARES_LIB_INIT_ALL) == ARES_SUCCESS) {
 #endif
         if (ares_init(&ghba_chan) == ARES_SUCCESS && ares_init(&ghbn_chan) == ARES_SUCCESS) {
             async_dns_initialized = TRUE;
+            c_ares_set_dns_servers();
         }
 #ifdef CARES_HAVE_ARES_LIBRARY_INIT
     }
 #endif
-#else
-#endif /* HAVE_C_ARES */
 
     if (extra_hosts_files && !gbl_resolv_flags.load_hosts_file_from_profile_only) {
         for (i = 0; i < extra_hosts_files->len; i++) {
@@ -3053,19 +3164,6 @@ void host_name_lookup_reset(void)
     host_name_lookup_init();
     vlan_name_lookup_cleanup();
     initialize_vlans();
-}
-
-void
-manually_resolve_cleanup(void)
-{
-    if (manually_resolved_ipv4_list) {
-        wmem_destroy_list(manually_resolved_ipv4_list);
-        manually_resolved_ipv4_list = NULL;
-    }
-    if (manually_resolved_ipv6_list) {
-        wmem_destroy_list(manually_resolved_ipv6_list);
-        manually_resolved_ipv6_list = NULL;
-    }
 }
 
 gchar *
@@ -3335,7 +3433,6 @@ eui64_to_display(wmem_allocator_t *allocator, const guint64 addr_eui64)
     return ret;
 } /* eui64_to_display */
 
-#ifdef HAVE_C_ARES
 #define GHI_TIMEOUT (250 * 1000)
 static void
 c_ares_ghi_cb(void *arg, int status, int timeouts _U_, struct hostent *hp) {
@@ -3349,7 +3446,6 @@ c_ares_ghi_cb(void *arg, int status, int timeouts _U_, struct hostent *hp) {
         ahp->copied = hp->h_length;
     }
 }
-#endif /* HAVE_C_ARES */
 
 /* Translate a string, assumed either to be a dotted-quad IPv4 address or
  * a host name, to a numeric IPv4 address.  Return TRUE if we succeed and
@@ -3357,12 +3453,10 @@ c_ares_ghi_cb(void *arg, int status, int timeouts _U_, struct hostent *hp) {
 gboolean
 get_host_ipaddr(const char *host, guint32 *addrp)
 {
-#ifdef HAVE_C_ARES
     struct timeval tv = { 0, GHI_TIMEOUT }, *tvp;
     int nfds;
     fd_set rfds, wfds;
     async_hostent_t ahe;
-#endif
 
     /*
      * XXX - are there places where this is used to translate something
@@ -3383,7 +3477,6 @@ get_host_ipaddr(const char *host, guint32 *addrp)
             return FALSE;
         }
 
-#ifdef HAVE_C_ARES
         if (!async_dns_initialized || name_resolve_concurrency < 1) {
             return FALSE;
         }
@@ -3409,7 +3502,6 @@ get_host_ipaddr(const char *host, guint32 *addrp)
             return TRUE;
         }
         return FALSE;
-#endif
     }
 
     return TRUE;
@@ -3423,12 +3515,10 @@ get_host_ipaddr(const char *host, guint32 *addrp)
 gboolean
 get_host_ipaddr6(const char *host, ws_in6_addr *addrp)
 {
-#ifdef HAVE_C_ARES
     struct timeval tv = { 0, GHI_TIMEOUT }, *tvp;
     int nfds;
     fd_set rfds, wfds;
     async_hostent_t ahe;
-#endif /* HAVE_C_ARES */
 
     if (str_to_ip6(host, addrp))
         return TRUE;
@@ -3450,7 +3540,6 @@ get_host_ipaddr6(const char *host, ws_in6_addr *addrp)
     }
 
     /* try FQDN */
-#ifdef HAVE_C_ARES
     if (!async_dns_initialized || name_resolve_concurrency < 1) {
         return FALSE;
     }
@@ -3475,7 +3564,6 @@ get_host_ipaddr6(const char *host, ws_in6_addr *addrp)
     if (ahe.addr_size == ahe.copied) {
         return TRUE;
     }
-#endif
 
     return FALSE;
 }

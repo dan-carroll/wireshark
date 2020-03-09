@@ -17,7 +17,7 @@
 #include <epan/in_cksum.h>
 #include <epan/nlpid.h>
 #include <epan/etypes.h>
-
+#include <epan/cisco_pid.h>
 
 /*
  * See
@@ -62,6 +62,10 @@ static int hf_cdp_capabilities_switch = -1;
 static int hf_cdp_capabilities_host = -1;
 static int hf_cdp_capabilities_igmp_capable = -1;
 static int hf_cdp_capabilities_repeater = -1;
+static int hf_cdp_capabilities_voip_phone = -1;
+static int hf_cdp_capabilities_remote = -1;
+static int hf_cdp_capabilities_cvta = -1;
+static int hf_cdp_capabilities_mac_relay = -1;
 static int hf_cdp_spare_poe_tlv = -1;
 static int hf_cdp_spare_poe_tlv_poe = -1;
 static int hf_cdp_spare_poe_tlv_spare_pair_arch = -1;
@@ -613,7 +617,7 @@ dissect_cdp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
                      * which, as a big-endian value, is not a VLAN ID, as
                      * VLAN IDs are 12 bits long.
                      */
-                    proto_tree_add_item(tlv_tree, hf_cdp_data, tvb, offset + 4, 2, ENC_BIG_ENDIAN);
+                    proto_tree_add_item(tlv_tree, hf_cdp_data, tvb, offset + 4, 2, ENC_NA);
                 } else {
                     /*
                      * XXX - is this a 1-byte "appliance type" code?
@@ -1045,7 +1049,7 @@ dissect_address_tlv(tvbuff_t *tvb, int offset, int length, proto_tree *tree)
     proto_tree *address_tree;
     guint8      protocol_type;
     guint8      protocol_length;
-    int         nlpid;
+    int         nlpid = 0;
     guint16     address_length;
     guint16     etypeid = 0;
     int         hf_addr = -1;
@@ -1167,6 +1171,10 @@ dissect_capabilities(tvbuff_t *tvb, int offset, int length, proto_tree *tree)
     proto_tree_add_item(capabilities_tree, hf_cdp_capabilities_host, tvb, offset, 4, ENC_BIG_ENDIAN);
     proto_tree_add_item(capabilities_tree, hf_cdp_capabilities_igmp_capable, tvb, offset, 4, ENC_BIG_ENDIAN);
     proto_tree_add_item(capabilities_tree, hf_cdp_capabilities_repeater, tvb, offset, 4, ENC_BIG_ENDIAN);
+    proto_tree_add_item(capabilities_tree, hf_cdp_capabilities_voip_phone , tvb, offset, 4, ENC_BIG_ENDIAN);
+    proto_tree_add_item(capabilities_tree, hf_cdp_capabilities_remote, tvb, offset, 4, ENC_BIG_ENDIAN);
+    proto_tree_add_item(capabilities_tree, hf_cdp_capabilities_cvta, tvb, offset, 4, ENC_BIG_ENDIAN);
+    proto_tree_add_item(capabilities_tree, hf_cdp_capabilities_mac_relay, tvb, offset, 4, ENC_BIG_ENDIAN);
 }
 
 static void
@@ -1361,6 +1369,22 @@ proto_register_cdp(void)
         {"Repeater", "cdp.capabilities.repeater", FT_BOOLEAN, 32,
                 TFS(&tfs_yes_no), 0x40, NULL, HFILL }},
 
+        { &hf_cdp_capabilities_voip_phone,
+        {"VoIP Phone", "cdp.capabilities.voip_phone", FT_BOOLEAN, 32,
+                TFS(&tfs_yes_no), 0x80, NULL, HFILL }},
+
+        { &hf_cdp_capabilities_remote,
+        {"Remotely Managed Device", "cdp.capabilities.remote", FT_BOOLEAN, 32,
+                TFS(&tfs_yes_no), 0x0100, NULL, HFILL }},
+
+        { &hf_cdp_capabilities_cvta,
+        {"CVTA/STP Dispute Resolution/Cisco VT Camera", "cdp.capabilities.cvta", FT_BOOLEAN, 32,
+                TFS(&tfs_yes_no), 0x0200, NULL, HFILL }},
+
+        { &hf_cdp_capabilities_mac_relay,
+        {"Two Port Mac Relay", "cdp.capabilities.mac_relay", FT_BOOLEAN, 32,
+                TFS(&tfs_yes_no), 0x0400, NULL, HFILL }},
+
         { &hf_cdp_spare_poe_tlv,
         { "Spare Pair PoE", "cdp.spare_poe_tlv", FT_UINT8, BASE_HEX,
                 NULL, 0x0, NULL, HFILL }
@@ -1479,7 +1503,7 @@ proto_reg_handoff_cdp(void)
     dissector_handle_t cdp_handle;
 
     cdp_handle  = create_dissector_handle(dissect_cdp, proto_cdp);
-    dissector_add_uint("llc.cisco_pid", 0x2000, cdp_handle);
+    dissector_add_uint("llc.cisco_pid", CISCO_PID_CDP, cdp_handle);
     dissector_add_uint("chdlc.protocol", 0x2000, cdp_handle);
     dissector_add_uint("ppp.protocol", 0x0207, cdp_handle);
     dissector_add_uint("gre.proto", 0x2000, cdp_handle);

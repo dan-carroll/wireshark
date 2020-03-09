@@ -25,6 +25,7 @@
 #include <QKeyEvent>
 
 #include <ui/qt/utils/qt_ui_utils.h>
+#include <ui/qt/wireshark_application.h>
 
 // To do:
 // - Fill in currently resolved address.
@@ -89,6 +90,8 @@ void AddressEditorFrame::editAddresses(CaptureFile &cf, int column)
 
     epan_dissect_cleanup(&edt);
 
+    displayPreviousUserDefinedHostname();
+
     ui->addressComboBox->addItems(addresses);
     ui->nameLineEdit->setFocus();
     updateWidgets();
@@ -117,10 +120,24 @@ void AddressEditorFrame::keyPressEvent(QKeyEvent *event)
     AccordionFrame::keyPressEvent(event);
 }
 
+void AddressEditorFrame::displayPreviousUserDefinedHostname()
+{
+    QString addr = ui->addressComboBox->currentText();
+    resolved_name_t* previous_entry = get_edited_resolved_name(addr.toUtf8().constData());
+    if (previous_entry)
+    {
+        ui->nameLineEdit->setText(previous_entry->name);
+    }
+    else
+    {
+        ui->nameLineEdit->setText("");
+    }
+}
+
 void AddressEditorFrame::updateWidgets()
 {
     bool ok_enable = false;
-    if (ui->addressComboBox->count() > 0 && !ui->nameLineEdit->text().isEmpty()) {
+    if (ui->addressComboBox->count() > 0) {
         ok_enable = true;
     }
 
@@ -129,13 +146,13 @@ void AddressEditorFrame::updateWidgets()
 
 void AddressEditorFrame::on_nameResolutionPreferencesToolButton_clicked()
 {
-    static const QString module_name = "nameres";
     on_buttonBox_rejected();
-    emit showNameResolutionPreferences(module_name);
+    emit showNameResolutionPreferences("nameres");
 }
 
 void AddressEditorFrame::on_addressComboBox_currentIndexChanged(const QString &)
 {
+    displayPreviousUserDefinedHostname();
     updateWidgets();
 }
 
@@ -146,14 +163,14 @@ void AddressEditorFrame::on_nameLineEdit_textEdited(const QString &)
 
 void AddressEditorFrame::on_buttonBox_accepted()
 {
-    if (ui->addressComboBox->count() < 1 || ui->nameLineEdit->text().isEmpty()) {
+    if (ui->addressComboBox->count() < 1) {
         return;
     }
     QString addr = ui->addressComboBox->currentText();
     QString name = ui->nameLineEdit->text();
     if (!cf_add_ip_name_from_string(cap_file_, addr.toUtf8().constData(), name.toUtf8().constData())) {
         QString error_msg = tr("Can't assign %1 to %2").arg(name).arg(addr);
-        emit editAddressStatus(error_msg);
+        wsApp->pushStatus(WiresharkApplication::TemporaryStatus, error_msg);
         ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(false);
         return;
     }

@@ -32,6 +32,7 @@
 	<!ENTITY VerizonWireless	SYSTEM "VerizonWireless.xml">
 	<!ENTITY Telefonica		SYSTEM "Telefonica.xml">
 	<!ENTITY Siemens		SYSTEM "Siemens.xml">
+	<!ENTITY Microsoft		SYSTEM "Microsoft.xml">
 	<!ENTITY Custom			SYSTEM "Custom.xml">
 ]>
 <dictionary>
@@ -3897,6 +3898,9 @@
 			<enum name="3GPP2" 		code="4"/>
 			<enum name="3GPP-EPS" 		code="5"/>
 			<enum name="Non-3GPP-EPS" 	code="6"/>
+			<enum name="FBA" 	code="7"/>
+			<enum name="3GPP-5GS" 	code="8"/>
+			<enum name="Non-3GPP-5GS" 	code="9"/>
 		</avp>
 		<avp name="QoS-Class-Identifier" code="1028" mandatory="must" may-encrypt="yes" protected="may" vendor-bit="must" vendor-id="TGPP">
 			<type type-name="Enumerated"/>
@@ -3963,6 +3967,7 @@
 			<enum name="HSPA_EVOLUTION"	code="1003"/>
 			<enum name="EUTRAN"		code="1004"/>
 			<enum name="EUTRAN-NB-IoT"	code="1005"/>
+			<enum name="NG-RAN"	code="1006"/>
 			<enum name="CDMA2000_1X"	code="2000"/>
 			<enum name="HRPD"		code="2001"/>
 			<enum name="UMB"		code="2002"/>
@@ -4714,7 +4719,7 @@
 			<enum name="LAWFUL_INTERCEPT_SERVICES" code="3"/>
 		</avp>
 		<avp name="Location-Estimate" code="1242" mandatory="must" may-encrypt="yes" protected="may"  vendor-bit="must" vendor-id="TGPP">
-			<type type-name="UTF8String"/>
+			<type type-name="OctetString"/>
 		</avp>
 		<avp name="Location-Estimate-Type" code="1243" mandatory="may" vendor-bit="must" vendor-id="TGPP">
 			<type type-name="Enumerated"/>
@@ -4723,6 +4728,7 @@
 			<enum name="INITIAL_LOCATION" code="2"/>
 			<enum name="ACTIVATE_DEFERRED_LOCATION" code="3"/>
 			<enum name="CANCEL_DEFERRED_LOCATION" code="4"/>
+			<enum name="NOTIFICATION_VERIFICATION_ONLY" code="5"/>
 		</avp>
 		<avp name="Location-Type" code="1244" mandatory="may" may-encrypt="no" protected="mustnot" vendor-bit="must" vendor-id="TGPP">
 			<grouped>
@@ -7876,6 +7882,7 @@
 				<gavp name="Visited-PLMN-Id"/>
 				<gavp name="Roaming-Information"/>
 				<gavp name="IMEI-Change"/>
+				<gavp name="Terminal-Information "/>
 				<gavp name="Reachability-Information"/>
 				<gavp name="Maximum-UE-Availability-Time"/>
 				<gavp name="EPS-Location-Information"/>
@@ -7884,7 +7891,8 @@
 				<gavp name="Service-Report"/>
 				<gavp name="Loss-Of-Connectivity-Reason"/>
 				<gavp name="Idle-Status-Indication"/>
-				<gavp name="Communication-Failure-Information"/>
+				<gavp name="Idle-Status-Indication"/>
+				<gavp name="PDN-Connectivity-Status-Report"/>
 				<gavp name="Number-Of-UE-Per-Location-Report"/>
 				<gavp name="Visited-PLMN-Id"/>
 			</grouped>
@@ -7910,6 +7918,7 @@
 			<enum name="NUMBER_OF_UES_PRESENT_IN_A_GEOGRAPHICAL_AREA" code="7"/>
 			<enum name="UE_REACHABILITY_AND_IDLE_STATUS_INDICATION" code="8"/>
 			<enum name="AVAILABILITY_AFTER_DDN_FAILURE_AND_IDLE_STATUS_INDICATION" code="9"/>
+			<enum name="PDN_CONNECTIVITY_STATUS " code="10"/>
 		</avp>
 		<avp name="Maximum-Number-of-Reports" code="3128" mandatory="must" vendor-bit="must" may-encrypt="no" vendor-id="TGPP">
 			<type type-name="Unsigned32"/>
@@ -8177,8 +8186,36 @@
 				<gavp name="MTC-Provider-ID"/>
 			</grouped>
 		</avp>
-		<avp name="MTC-Provider-ID" code="3176" mandatory="mustnot" may-encrypt="no" vendor-bit="must" vendor-id="TGPP">
+		<avp name="MTC-Provider-ID" code="3179" mandatory="mustnot" may-encrypt="no" vendor-bit="must" vendor-id="TGPP">
 			<type type-name="UTF8String"/>
+		</avp>
+		<avp name="PDN-Connectivity-Status-Configuration" code="3180" mandatory="mustnot" may-encrypt="no" vendor-bit="must" vendor-id="TGPP">
+			<grouped>
+				<gavp name="Service-Selection"/>
+			</grouped>
+		</avp>
+		<avp name="PDN-Connectivity-Status-Report" code="3181" mandatory="mustnot" may-encrypt="no" vendor-bit="must" vendor-id="TGPP">
+			<grouped>
+				<gavp name="Service-Selection"/>
+				<gavp name="PDN-Connectivity-Status-Type"/>
+				<gavp name="PDN-Type"/>
+				<gavp name="Non-IP-PDN-Type-Indicator"/>
+				<gavp name="Non-IP-Data-Delivery-Mechanism"/>
+				<gavp name="Served-Party-IP-Address"/>
+			</grouped>
+		</avp>
+		<avp name="PDN-Connectivity-Status-Type" code="3182" mandatory="mustnot" may-encrypt="no" vendor-bit="must" vendor-id="TGPP">
+			<type type-name="Unsigned32"/>
+			<enum name="CREATED" code="0"/>
+			<enum name="DELETED " code="1"/>
+		</avp>
+		<avp name="Traffic-Profile" code="3183" mandatory="mustnot" may-encrypt="no" vendor-bit="must" vendor-id="TGPP">
+			<type type-name="Unsigned32"/>
+			<enum name="SINGLE_TRANSMISSION_UL " code="0"/>
+			<enum name="SINGLE_TRANSMISSION_D " code="1"/>
+			<enum name="DUAL_TRANSMISSION_UL_WITH_SUBSEQUENT_DL" code="2"/>
+			<enum name="DUAL_TRANSMISSION_DL_WITH_SUBSEQUENT_UL" code="3"/>
+			<enum name="MULTI_TRANSMISSION" code="4"/>
 		</avp>
 		<!--
 		Note: The AVP codes from 3163 to 3199 are reserved for TS 29.336
@@ -8627,6 +8664,27 @@
 			<enum name="Active" code="0"/>
 			<enum name="Inactive" code="1"/>
 		</avp>
+		<avp name="Unused-Quota-Timer" code="4407" mandatory="must" vendor-bit="must" protected="may" may-encrypt="yes" vendor-id="TGPP">
+			<type type-name="Unsigned32"/>
+		</avp>
+		<avp name="Announcing-PLMN-ID" code="4408" mandatory="must" vendor-bit="must" may-encrypt="no" protected="may" vendor-id="TGPP">
+			<type type-name="UTF8String"/>
+		</avp>
+		<avp name="ProSe-UE-to-Network-Relay-UE-ID" code="4409" mandatory="must" vendor-bit="must" may-encrypt="no" protected="may" vendor-id="TGPP">
+			<type type-name="OctetString"/>
+		</avp>
+		<avp name="ProSe-Target-Layer-2-ID" code="4410" mandatory="must" vendor-bit="must" may-encrypt="no" protected="may" vendor-id="TGPP">
+			<type type-name="OctetString"/>
+		</avp>
+		<avp name="Relay-IP-address" code="4411" mandatory="must" vendor-bit="must" may-encrypt="no" protected="may" vendor-id="TGPP">
+			<type type-name="IPAddress"/>
+		</avp>
+		<avp name="Target-IP-Address" code="4412" mandatory="must" vendor-bit="must" may-encrypt="no" protected="may" vendor-id="TGPP">
+			<type type-name="IPAddress"/>
+		</avp>
+		<avp name="FE-Identifier-List" code="4413" mandatory="must" vendor-bit="must" may-encrypt="no" protected="may" vendor-id="TGPP">
+			<type type-name="UTF8String"/>
+		</avp>
 		<!--
 		Note: The AVP codes from 4400 to 4499 are reserved for TS 32.299
 		-->
@@ -8839,5 +8897,6 @@
 	&VerizonWireless;
 	&Telefonica;
 	&Siemens;
+	&Microsoft;
 	&Custom;
 </dictionary>

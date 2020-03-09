@@ -24,7 +24,7 @@
 #include "ui/capture.h"
 #include "caputils/capture_ifinfo.h"
 #include <capchild/capture_sync.h>
-#include "capture_info.h"
+#include "ui/capture_info.h"
 #include "ui/capture_ui_utils.h"
 #include "ui/util.h"
 #include "caputils/capture-pcap-util.h"
@@ -414,6 +414,7 @@ capture_input_new_file(capture_session *cap_session, gchar *new_file)
         /* (we can only have an open capture file in real_time_mode!) */
         if( ((capture_file *) cap_session->cf)->state != FILE_CLOSED) {
             if(capture_opts->real_time_mode) {
+                cap_session->session_will_restart = TRUE;
                 capture_callback_invoke(capture_cb_capture_update_finished, cap_session);
                 cf_finish_tail((capture_file *)cap_session->cf,
                                &cap_session->rec, &cap_session->buf, &err);
@@ -476,6 +477,59 @@ capture_input_new_file(capture_session *cap_session, gchar *new_file)
     return TRUE;
 }
 
+static void
+capture_info_packet(info_data_t* cap_info, gint wtap_linktype, const guchar *pd, guint32 caplen, union wtap_pseudo_header *pseudo_header)
+{
+    capture_packet_info_t cpinfo;
+
+    /* Setup the capture packet structure */
+    cpinfo.counts = cap_info->counts.counts_hash;
+
+    cap_info->counts.total++;
+    if (!try_capture_dissector("wtap_encap", wtap_linktype, pd, 0, caplen, &cpinfo, pseudo_header))
+        cap_info->counts.other++;
+}
+
+/* new packets arrived */
+static void
+capture_info_new_packets(int to_read, wtap *wth, info_data_t* cap_info)
+{
+    int err;
+    gchar *err_info;
+    gint64 data_offset;
+    wtap_rec rec;
+    Buffer buf;
+    union wtap_pseudo_header *pseudo_header;
+    int wtap_linktype;
+
+    cap_info->ui.new_packets = to_read;
+
+    /*g_warning("new packets: %u", to_read);*/
+
+    wtap_rec_init(&rec);
+    ws_buffer_init(&buf, 1514);
+    while (to_read > 0) {
+        wtap_cleareof(wth);
+        if (wtap_read(wth, &rec, &buf, &err, &err_info, &data_offset)) {
+            if (rec.rec_type == REC_TYPE_PACKET) {
+                pseudo_header = &rec.rec_header.packet_header.pseudo_header;
+                wtap_linktype = rec.rec_header.packet_header.pkt_encap;
+
+                capture_info_packet(cap_info, wtap_linktype,
+                    ws_buffer_start_ptr(&buf),
+                    rec.rec_header.packet_header.caplen,
+                    pseudo_header);
+
+                /*g_warning("new packet");*/
+                to_read--;
+            }
+        }
+    }
+    wtap_rec_cleanup(&rec);
+    ws_buffer_free(&buf);
+
+    capture_info_ui_update(&cap_info->ui);
+}
 
 /* capture child tells us we have new packets to read */
 void
@@ -661,6 +715,7 @@ capture_input_closed(capture_session *cap_session, gchar *msg)
             /* Tell the GUI we are not doing a capture any more.
                Must be done after the cf_finish_tail(), so file lengths are
                correctly displayed */
+            cap_session->session_will_restart = FALSE;
             capture_callback_invoke(capture_cb_capture_update_finished, cap_session);
 
             /* Finish the capture. */

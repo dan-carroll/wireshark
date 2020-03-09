@@ -87,7 +87,6 @@ SequenceDialog::SequenceDialog(QWidget &parent, CaptureFile &cf, SequenceInfo *i
     }
 
     seq_diagram_ = new SequenceDiagram(sp->yAxis, sp->xAxis2, sp->yAxis2);
-    sp->addPlottable(seq_diagram_);
 
     // When dragging is enabled it's easy to drag past the lower and upper
     // bounds of each axis. Disable it for now.
@@ -110,7 +109,6 @@ SequenceDialog::SequenceDialog(QWidget &parent, CaptureFile &cf, SequenceInfo *i
 
     key_text_ = new QCPItemText(sp);
     key_text_->setText(tr("Time"));
-    sp->addItem(key_text_);
 
     key_text_->setPositionAlignment(Qt::AlignRight | Qt::AlignVCenter);
     key_text_->position->setType(QCPItemPosition::ptAbsolute);
@@ -118,7 +116,6 @@ SequenceDialog::SequenceDialog(QWidget &parent, CaptureFile &cf, SequenceInfo *i
 
     comment_text_ = new QCPItemText(sp);
     comment_text_->setText(tr("Comment"));
-    sp->addItem(comment_text_);
 
     comment_text_->setPositionAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     comment_text_->position->setType(QCPItemPosition::ptAbsolute);
@@ -133,7 +130,8 @@ SequenceDialog::SequenceDialog(QWidget &parent, CaptureFile &cf, SequenceInfo *i
 
     ctx_menu_.addAction(ui->actionZoomIn);
     ctx_menu_.addAction(ui->actionZoomOut);
-    ctx_menu_.addAction(ui->actionReset);
+    QAction * action = ctx_menu_.addAction(tr("Reset Diagram"), this, SLOT(resetView()));
+    action->setToolTip(tr("Reset the diagram to its initial state."));
     ctx_menu_.addSeparator();
     ctx_menu_.addAction(ui->actionMoveRight10);
     ctx_menu_.addAction(ui->actionMoveLeft10);
@@ -147,8 +145,13 @@ SequenceDialog::SequenceDialog(QWidget &parent, CaptureFile &cf, SequenceInfo *i
     ctx_menu_.addAction(ui->actionGoToPacket);
     ctx_menu_.addAction(ui->actionGoToNextPacket);
     ctx_menu_.addAction(ui->actionGoToPreviousPacket);
+    set_action_shortcuts_visible_in_context_menu(ctx_menu_.actions());
 
     ui->addressComboBox->setCurrentIndex(0);
+
+    QPushButton * btn = ui->buttonBox->addButton(tr("Reset Diagram"), QDialogButtonBox::ActionRole);
+    btn->setToolTip(tr("Reset the diagram to its initial state."));
+    connect(btn, &QPushButton::clicked, this, &SequenceDialog::resetView);
 
     sequence_items_t item_data;
 
@@ -519,7 +522,7 @@ void SequenceDialog::resetAxes(bool keep_lower)
     // - Anchor a QCPItemText to one of the corners of a QCPAxis.
     // Neither of those appear to be possible, so we first call replot in
     // order to lay out our X axes, place our labels, the call replot again.
-    sp->replot(QCustomPlot::rpQueued);
+    sp->replot(QCustomPlot::rpQueuedReplot);
 
     QRect axis_rect = sp->axisRect()->rect();
 
@@ -534,10 +537,10 @@ void SequenceDialog::resetAxes(bool keep_lower)
                                        + sp->yAxis2->offset(),
                                        axis_rect.top()  / 2);
 
-    sp->replot(QCustomPlot::rpHint);
+    sp->replot(QCustomPlot::rpRefreshHint);
 }
 
-void SequenceDialog::on_resetButton_clicked()
+void SequenceDialog::resetView()
 {
     resetAxes();
 }
@@ -627,11 +630,6 @@ void SequenceDialog::on_addressComboBox_activated(int index)
         info_->sainfo()->any_addr = FALSE;
     }
     fillDiagram();
-}
-
-void SequenceDialog::on_actionReset_triggered()
-{
-    on_resetButton_clicked();
 }
 
 void SequenceDialog::on_actionMoveRight10_triggered()

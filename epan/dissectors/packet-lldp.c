@@ -169,6 +169,7 @@ static int hf_ieee_802_1_proto_id = -1;
 static int hf_ieee_802_1_aggregation_status = -1;
 static int hf_ieee_802_1_aggregation_status_cap = -1;
 static int hf_ieee_802_1_aggregation_status_enabled = -1;
+static int hf_ieee_802_1_aggregation_status_porttype = -1;
 static int hf_ieee_802_1_aggregated_port_id = -1;
 static int hf_ieee_8021qau_cnpv_prio0 = -1;
 static int hf_ieee_8021qau_cnpv_prio1 = -1;
@@ -388,7 +389,7 @@ static int hf_cisco_aci_pod = -1;
 static int hf_cisco_aci_fabricname = -1;
 static int hf_cisco_aci_apiclist = -1;
 static int hf_cisco_aci_apicid = -1;
-static int hf_cisco_aci_apicip = -1;
+static int hf_cisco_aci_apicipv4 = -1;
 static int hf_cisco_aci_apicuuid = -1;
 static int hf_cisco_aci_nodeip = -1;
 static int hf_cisco_aci_unknownd1 = -1;
@@ -397,7 +398,7 @@ static int hf_cisco_aci_fabricvlan = -1;
 static int hf_cisco_aci_serialno = -1;
 static int hf_cisco_aci_model = -1;
 static int hf_cisco_aci_nodename = -1;
-static int hf_cisco_aci_unknownd8 = -1;
+static int hf_cisco_aci_portmode = -1;
 static int hf_cisco_aci_unknownd9 = -1;
 static int hf_cisco_aci_apicmode = -1;
 static int hf_hytec_tlv_subtype = -1;
@@ -442,6 +443,10 @@ static int hf_unknown_subtype_content = -1;
 static int hf_subtype_content_remaining = -1;
 static int hf_iana_subtype = -1;
 static int hf_iana_mudurl = -1;
+static int hf_onos_subtype = -1;
+static int hf_onos_chassis = -1;
+static int hf_onos_port = -1;
+static int hf_onos_ttl = -1;
 
 /* Initialize the subtree pointers */
 static gint ett_lldp = -1;
@@ -572,6 +577,14 @@ static const value_string chassis_id_subtypes[] = {
 	{ 5,	"Network address"},
 	{ 6,	"Interface name"},
 	{ 7,	"Locally assigned"},
+	{ 0, NULL}
+};
+
+static const value_string porttype_values[] = {
+	{ 0,	"Not specified"},
+	{ 1,	"From aggregation port"},
+	{ 2,	"From aggregator"},
+	{ 3,	"From single-port aggregator"},
 	{ 0, NULL}
 };
 
@@ -740,6 +753,19 @@ static const value_string ex_avaya_subtypes[] = {
 	{ 0, NULL }
 };
 
+/* ONOS subtypes */
+/* https://github.com/opennetworkinglab/onos/blob/master/utils/misc/src/main/java/org/onlab/packet/LLDP.java */
+#define ONOS_CHASSIS_TLV_TYPE 1
+#define ONOS_PORT_TLV_TYPE 2
+#define ONOS_TTL_TLV_TYPE 3
+static const value_string onos_subtypes[] = {
+	{ ONOS_CHASSIS_TLV_TYPE, "ONOS Chassis" },
+	{ ONOS_PORT_TLV_TYPE, "ONOS Port" },
+	{ ONOS_TTL_TLV_TYPE, "ONOS TTL" },
+	{ 0, NULL }
+};
+
+
 /* Cisco Subtypes */
 static const value_string cisco_subtypes[] = {
 	/* UPOE: https://www.cisco.com/c/dam/en/us/solutions/collateral/workforce-experience/digital-building/digital-building-partner-guide.pdf */
@@ -749,17 +775,17 @@ static const value_string cisco_subtypes[] = {
 	{ 0xca, "ACI Node Role" },
 	{ 0xcb, "ACI Node ID" },
 	{ 0xcc, "ACI Unknown-CC" },
-	{ 0xcd, "ACI Pod" },
-	{ 0xce, "ACI Fabricname" },
-	{ 0xcf, "ACI APIC List" },
+	{ 0xcd, "ACI Pod ID" },
+	{ 0xce, "ACI Fabric Name" },
+	{ 0xcf, "ACI Appliance Vector" },
 	{ 0xd0, "ACI Node IP" },
 	{ 0xd1, "ACI Unknown-D1" },
-	{ 0xd2, "ACI Version" },
-	{ 0xd3, "ACI Fabric VLAN" },
-	{ 0xd4, "ACI SerialNo" },
+	{ 0xd2, "ACI Firmware Version" },
+	{ 0xd3, "ACI Infra VLAN" },
+	{ 0xd4, "ACI Serial Number" },
 	{ 0xd6, "ACI Model" },
 	{ 0xd7, "ACI Node Name" },
-	{ 0xd8, "ACI Unknown-D8" },
+	{ 0xd8, "ACI Port Mode" },
 	{ 0xd9, "ACI Unknown D9" },
 	{ 0xda, "ACI APIC-Mode" },
 	{ 0xdb, "ACI Unknown-DB" },
@@ -1333,6 +1359,7 @@ dissect_lldp_chassis_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gui
 	guint16 tempShort;
 	guint32 dataLen = 0;
 	const char *strPtr=NULL;
+        const char *idType=NULL;
 	guint8 addr_family = 0;
 
 	proto_tree	*chassis_tree = NULL;
@@ -1387,6 +1414,7 @@ dissect_lldp_chassis_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gui
 			return -1;
 		}
 
+		idType="MA";
 		strPtr = tvb_ether_to_str(tvb, offset);
 		proto_tree_add_item(chassis_tree, hf_chassis_id_mac, tvb, offset, 6, ENC_NA);
 		pn_lldp_column_info->chassis_id_mac = wmem_strdup(wmem_packet_scope(), strPtr);
@@ -1400,6 +1428,8 @@ dissect_lldp_chassis_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gui
 		addr_family = tvb_get_guint8(tvb,offset);
 
 		offset++;
+
+		idType="NA";
 
 		/* Check for IPv4 or IPv6 */
 		switch(addr_family){
@@ -1454,23 +1484,29 @@ dissect_lldp_chassis_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gui
 		switch(tlvsubType)
 		{
 		case 2: /* Interface alias */
+			idType="IA";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen - 1));
 			break;
 		case 6: /* Interfae name */
+			idType="IN";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen - 1));
 			break;
 		case 7: /* Locally assigned */
+			idType="LA";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen-1));
 			pn_lldp_column_info->chassis_id_locally_assigned = wmem_strdup(wmem_packet_scope(), strPtr);
 			break;
 		case 1: /* Chassis component */
+			idType="CC";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen - 1));
 			break;
 		case 3: /* Port component */
+			idType="PC";
 			strPtr = tvb_bytes_to_str(wmem_packet_scope(), tvb, offset, (dataLen-1));
 
 			break;
 		default:
+			idType="Rs";
 			strPtr = "Reserved";
 
 			break;
@@ -1483,6 +1519,10 @@ dissect_lldp_chassis_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, gui
 	}
 	}
 
+	if (column_info_selection == DEFAULT_COLUMN_INFO)
+	{
+		col_append_fstr(pinfo->cinfo, COL_INFO, "%s/%s ", idType, strPtr);
+	}
 	proto_item_append_text(tf, ", Id: %s", strPtr);
 
 	return offset;
@@ -1497,6 +1537,7 @@ dissect_lldp_port_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, guint3
 	guint16 tempShort;
 	guint32 dataLen = 0;
 	const char *strPtr=NULL;
+	const char *idType=NULL;
 	guint8 addr_family = 0;
 
 	proto_tree	*port_tree = NULL;
@@ -1548,6 +1589,7 @@ dissect_lldp_port_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, guint3
 			return -1;
 		}
 
+		idType = "MA";
 		strPtr = tvb_ether_to_str(tvb, offset);
 		proto_tree_add_item(port_tree, hf_port_id_mac, tvb, offset, 6, ENC_NA);
 
@@ -1559,6 +1601,8 @@ dissect_lldp_port_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, guint3
 		proto_tree_add_item(port_tree, hf_lldp_network_address_family, tvb, offset, 1, ENC_BIG_ENDIAN);
 
 		offset++;
+
+		idType = "NA";
 
 		/* Check for IPv4 or IPv6 */
 		switch(addr_family){
@@ -1610,23 +1654,29 @@ dissect_lldp_port_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, guint3
 
 		switch (tlvsubType)
 		{
-		case 2: /* Port component */
-			strPtr = tvb_bytes_to_str(wmem_packet_scope(), tvb, offset, (dataLen-1));
-			break;
 		case 1: /* Interface alias */
+			idType = "IA";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen - 1));
 			break;
+		case 2: /* Port component */
+			idType = "PC";
+			strPtr = tvb_bytes_to_str(wmem_packet_scope(), tvb, offset, (dataLen-1));
+			break;
 		case 5: /* Interface name */
+			idType = "IN";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen - 1));
 			break;
 		case 6: /* Agent circuit ID */
+			idType = "AC";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen - 1));
 			break;
 		case 7: /* Locally assigned */
+			idType = "LA";
 			strPtr = tvb_format_stringzpad(tvb, offset, (dataLen-1));
 			pn_lldp_column_info->port_id_locally_assigned = wmem_strdup(wmem_packet_scope(), strPtr);
 			break;
 		default:
+			idType = "Rs";
 			strPtr = "Reserved";
 			break;
 		}
@@ -1636,7 +1686,10 @@ dissect_lldp_port_id(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, guint3
 		offset += (dataLen - 1);
 		break;
 	}
-
+	if (column_info_selection == DEFAULT_COLUMN_INFO)
+	{
+		col_append_fstr(pinfo->cinfo, COL_INFO, "%s/%s ", idType, strPtr);
+	}
 	proto_item_append_text(tf, ", Id: %s", strPtr);
 
 	return offset;
@@ -1663,7 +1716,7 @@ dissect_lldp_time_to_live(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, g
 	tempShort = tvb_get_ntohs(tvb, (offset+2));
 	if (column_info_selection == DEFAULT_COLUMN_INFO)
 	{
-		col_append_fstr(pinfo->cinfo, COL_INFO, "TTL = %u ", tempShort);
+		col_append_fstr(pinfo->cinfo, COL_INFO, "%u ", tempShort);
 	}
 
 	/* Set port tree */
@@ -1767,14 +1820,14 @@ dissect_lldp_system_name(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree
 										ett_system_name, NULL, "System Name = %s", strPtr);
 		if (column_info_selection == DEFAULT_COLUMN_INFO)
 		{
-			col_append_fstr(pinfo->cinfo, COL_INFO, "SysName = %s ", strPtr);
+			col_append_fstr(pinfo->cinfo, COL_INFO, "SysN=%s ", strPtr);
 		}
 	} else {
 		system_subtree = proto_tree_add_subtree_format(tree, tvb, offset, (dataLen + 2),
 										ett_system_desc, NULL, "System Description = %s", strPtr);
 		if (column_info_selection == DEFAULT_COLUMN_INFO)
 		{
-			col_append_fstr(pinfo->cinfo, COL_INFO, "SysDesc = %s ", strPtr);
+			col_append_fstr(pinfo->cinfo, COL_INFO, "SysD=%s ", strPtr);
 		}
 	}
 
@@ -2236,6 +2289,7 @@ dissect_ieee_802_1_tlv(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree)
 		mac_phy_flags = proto_item_add_subtree(tf, ett_802_1_aggregation);
 		proto_tree_add_item(mac_phy_flags, hf_ieee_802_1_aggregation_status_cap, tvb, offset, 1, ENC_BIG_ENDIAN);
 		proto_tree_add_item(mac_phy_flags, hf_ieee_802_1_aggregation_status_enabled, tvb, offset, 1, ENC_BIG_ENDIAN);
+		proto_tree_add_item(mac_phy_flags, hf_ieee_802_1_aggregation_status_porttype, tvb, offset, 1, ENC_BIG_ENDIAN);
 
 		offset++;
 
@@ -3615,7 +3669,7 @@ dissect_cisco_tlv(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree)
 			proto_item_append_text(parent_item, ": ID %s", value_str);
 			offset++;
 			length--;
-			proto_tree_add_item(tree, hf_cisco_aci_apicip, tvb, offset, 4, ENC_NA);
+			proto_tree_add_item(tree, hf_cisco_aci_apicipv4, tvb, offset, 4, ENC_NA);
 			offset += 4;
 			length -= 4;
 			proto_tree_add_item(tree, hf_cisco_aci_apicuuid, tvb, offset, 36, ENC_ASCII|ENC_NA);
@@ -3680,7 +3734,7 @@ dissect_cisco_tlv(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree)
 		length -= length;
 		break;
 	case 0xd8:
-		tf = proto_tree_add_item(tree, hf_cisco_aci_unknownd8, tvb, offset, length, ENC_NA);
+		tf = proto_tree_add_item(tree, hf_cisco_aci_portmode, tvb, offset, length, ENC_NA);
 		fi = PITEM_FINFO(tf);
 		value_str = fvalue_to_string_repr(NULL, &fi->value, FTREPR_DISPLAY, fi->hfinfo->display);
 		proto_item_append_text(parent_item, ": %s", value_str);
@@ -4100,6 +4154,34 @@ dissect_iana_tlv(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree)
 	}
 }
 
+static void
+dissect_onos_tlv(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree)
+{
+	guint16 msg_len;
+	guint32  subType;
+	guint32 offset = 0;
+
+	proto_tree_add_item_ret_uint(tree, hf_onos_subtype, tvb, offset, 1, ENC_BIG_ENDIAN, &subType);
+	offset++;
+
+	msg_len=tvb_reported_length_remaining(tvb, offset);
+	switch (subType)
+	{
+	case ONOS_CHASSIS_TLV_TYPE:
+		proto_tree_add_item(tree, hf_onos_chassis, tvb, offset, msg_len, ENC_ASCII|ENC_NA);
+		break;
+	case ONOS_PORT_TLV_TYPE:
+		proto_tree_add_item(tree, hf_onos_port, tvb, offset, msg_len, ENC_ASCII|ENC_NA);
+		break;
+	case ONOS_TTL_TLV_TYPE:
+		proto_tree_add_item(tree, hf_onos_ttl, tvb, offset, msg_len, ENC_NA);
+		break;
+	default:
+		proto_tree_add_item(tree, hf_unknown_subtype_content, tvb, offset, -1, ENC_NA);
+		break;
+	}
+}
+
 
 /* Dissect Organizational Specific TLV */
 static gint32
@@ -4267,6 +4349,9 @@ dissect_organizational_specific_tlv(tvbuff_t *tvb, packet_info *pinfo, proto_tre
 	case OUI_IANA:
 		subTypeStr = val_to_str(subType, iana_subtypes, "Unknown subtype (0x%x)");
 		break;
+	case OUI_ONOS:
+		subTypeStr = val_to_str(subType, onos_subtypes, "Unknown subtype (0x%x)");
+		break;
 	default:
 		subTypeStr = wmem_strdup_printf(wmem_packet_scope(), "Unknown (%d)",subType);
 		break;
@@ -4323,6 +4408,9 @@ dissect_organizational_specific_tlv(tvbuff_t *tvb, packet_info *pinfo, proto_tre
 		break;
 	case OUI_AVAYA_EXTREME:
 		dissect_extreme_avaya_tlv(tvb, pinfo, org_tlv_tree, (offset + 5),dataLen );
+		break;
+	case OUI_ONOS:
+		dissect_onos_tlv(vendor_tvb, pinfo, org_tlv_tree);
 		break;
 	default:
 		dissect_oui_default_tlv(vendor_tvb, pinfo, org_tlv_tree);
@@ -4480,8 +4568,10 @@ dissect_lldp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_
 			break;
 		}
 
-		if (rtnValue < 0)
+		if (rtnValue < 0) {
 			reachedEnd = TRUE;
+			set_actual_length(tvb, offset + rtnValue);
+		}
 		else
 			offset += rtnValue;
 	}
@@ -4905,6 +4995,10 @@ proto_register_lldp(void)
 		{ &hf_ieee_802_1_aggregation_status_enabled,
 			{ "Aggregation Status", "lldp.ieee.802_1.aggregation_status.enabled", FT_BOOLEAN, 8,
 			TFS(&tfs_enabled_disabled), 0x02, NULL, HFILL }
+		},
+		{ &hf_ieee_802_1_aggregation_status_porttype,
+			{ "Aggregation Status", "lldp.ieee.802_1.aggregation_status.porttype", FT_UINT8, BASE_DEC,
+			VALS(porttype_values), 0x0c, NULL, HFILL }
 		},
 		{ &hf_ieee_802_1_aggregated_port_id,
 			{ "Aggregated Port Id", "lldp.ieee.802_1.aggregated_port_id", FT_UINT32, BASE_DEC,
@@ -5772,19 +5866,18 @@ proto_register_lldp(void)
 			NULL, 0x0, NULL, HFILL }
 		},
 		{ &hf_cisco_aci_apiclist,
-			{ "APIC List", "lldp.cisco.apiclist", FT_BYTES, BASE_NONE,
+			{ "Appliance Vector", "lldp.cisco.apiclist", FT_BYTES, BASE_NONE,
 			NULL, 0x0, NULL, HFILL }
 		},
 		{ &hf_cisco_aci_apicid,
 			{ "APIC ID", "lldp.cisco.apicid", FT_UINT8, BASE_DEC,
 			NULL, 0x0, NULL, HFILL }
 		},
-		{ &hf_cisco_aci_apicip,
-			{ "APIC IP", "lldp.cisco.apicip", FT_IPv4, BASE_NONE,
+		{ &hf_cisco_aci_apicipv4,
+			{ "APIC IPv4", "lldp.cisco.apicipv4", FT_IPv4, BASE_NONE,
 			NULL, 0x0, NULL, HFILL }
 		},
 		{ &hf_cisco_aci_apicuuid,
-			/* FIXME: Why can't I use FT_GUID here (malformed because len != 16)??? */
 			{ "APIC UUID", "lldp.cisco.apicuuid", FT_STRING, BASE_NONE,
 			NULL, 0x0, NULL, HFILL }
 		},
@@ -5816,8 +5909,8 @@ proto_register_lldp(void)
 			{ "Node Name", "lldp.cisco.nodename", FT_STRING, BASE_NONE,
 			NULL, 0x0, NULL, HFILL }
 		},
-		{ &hf_cisco_aci_unknownd8,
-			{ "Unknown 0xD8", "lldp.cisco.unknownd8", FT_BYTES, BASE_NONE,
+		{ &hf_cisco_aci_portmode,
+			{ "Port Mode", "lldp.cisco.portmode", FT_BYTES, BASE_NONE,
 			NULL, 0x0, NULL, HFILL }
 		},
 		{ &hf_cisco_aci_unknownd9,
@@ -5982,6 +6075,22 @@ proto_register_lldp(void)
 		},
 		{ &hf_iana_mudurl,
 			{ "Manufacturer Usage Description URL", "lldp.iana.mudurl", FT_STRING, BASE_NONE,
+			NULL, 0x0, NULL, HFILL }
+		},
+		{ &hf_onos_subtype,
+			{ "ONOS Subtype", "lldp.onos.subtype", FT_UINT8, BASE_HEX,
+			  VALS(onos_subtypes), 0x0, NULL, HFILL }
+		},
+		{ &hf_onos_chassis,
+			{ "Chassis", "lldp.onos.chassis", FT_STRING, BASE_NONE,
+			NULL, 0x0, NULL, HFILL }
+		},
+		{ &hf_onos_port,
+			{ "Port", "lldp.onos.port", FT_STRING, BASE_NONE,
+			NULL, 0x0, NULL, HFILL }
+		},
+		{ &hf_onos_ttl,
+			{ "ttl", "lldp.onos.ttl", FT_UINT32, BASE_DEC,
 			NULL, 0x0, NULL, HFILL }
 		},
 		{ &hf_unknown_subtype,
@@ -6163,6 +6272,7 @@ proto_reg_handoff_lldp(void)
 
 	lldp_handle = create_dissector_handle(dissect_lldp,proto_lldp);
 	dissector_add_uint("ethertype", ETHERTYPE_LLDP, lldp_handle);
+	dissector_add_uint("ethertype", ETHERTYPE_ONOS, lldp_handle);
 }
 
 /*

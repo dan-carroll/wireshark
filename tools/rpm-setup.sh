@@ -28,6 +28,7 @@ then
 	exit 1
 fi
 
+ADDITIONAL=0
 for op
 do
 	if [ "$op" = "--install-optional" ]
@@ -43,6 +44,7 @@ BASIC_LIST="cmake \
 	gcc-c++ \
 	flex \
 	bison \
+	python3 \
 	perl \
 	desktop-file-utils \
 	git \
@@ -50,8 +52,7 @@ BASIC_LIST="cmake \
 	libpcap-devel \
 	zlib-devel"
 
-ADDITIONAL_LIST="libnl3-devel \
-	libcap-devel \
+ADDITIONAL_LIST="libcap-devel \
 	libgcrypt-devel \
 	libssh-devel \
 	krb5-devel \
@@ -119,11 +120,6 @@ add_packages() {
 	eval "${list}=\"\${${list}} \${pkgnames}\""
 }
 
-# python3: OpenSUSE 43.3, Fedora 26
-# python34: Centos 7
-add_package BASIC_LIST python3 || add_package BASIC_LIST python34 ||
-echo "python3 is unavailable" >&2
-
 add_package BASIC_LIST cmake3 || add_package BASIC_LIST cmake ||
 echo "cmake is unavailable" >&2
 
@@ -148,23 +144,18 @@ echo "zlib is unavailable" >&2
 add_package BASIC_LIST c-ares-devel || add_package BASIC_LIST libcares-devel ||
 echo "libcares-devel is unavailable" >&2
 
-add_package BASIC_LIST qt-devel ||
-echo "Qt5 devel is unavailable" >&2
-
-add_package BASIC_LIST qt5-qtbase-devel ||
-echo "Qt5 base devel is unavailable" >&2
-
-add_package BASIC_LIST qt5-linguist || add_package BASIC_LIST libqt5-linguist-devel ||
+# qt5-linguist: CentOS, Fedora
+# libqt5-linguist-devel: OpenSUSE
+add_package BASIC_LIST qt5-linguist ||
+add_package BASIC_LIST libqt5-linguist-devel ||
 echo "Qt5 linguist is unavailable" >&2
 
-add_package BASIC_LIST qt5-qtsvg-devel || add_package BASIC_LIST libqt5-qtsvg-devel ||
-echo "Qt5 svg is unavailable" >&2
-
-add_package BASIC_LIST qt5-qtmultimedia-devel || add_package BASIC_LIST libqt5-qtmultimedia-devel ||
-echo "Qt5 multimedia is unavailable" >&2
-
-add_package BASIC_LIST libQt5PrintSupport-devel ||
-echo "Qt5 print support is unavailable" >&2
+# qt5-qtmultimedia: CentOS, Fedora, pulls in qt5-qtbase-devel (big dependency list!)
+# libqt5-qtmultimedia-devel: OpenSUSE, pulls in Core, Gui, Multimedia, Network, Widgets
+# OpenSUSE additionally has a separate Qt5PrintSupport package.
+add_package BASIC_LIST qt5-qtmultimedia-devel ||
+add_packages BASIC_LIST libqt5-qtmultimedia-devel libQt5PrintSupport-devel ||
+echo "Qt5 is unavailable" >&2
 
 # This in only required (and available) on OpenSUSE
 add_package BASIC_LIST update-desktop-files ||
@@ -183,6 +174,8 @@ echo "nghttp2 is unavailable" >&2
 
 add_package ADDITIONAL_LIST snappy || add_package ADDITIONAL_LIST libsnappy1 ||
 echo "snappy is unavailable" >&2
+
+add_package ADDITIONAL_LIST libzstd-devel || echo "zstd is unavailable" >&2
 
 add_package ADDITIONAL_LIST lz4-devel || add_package ADDITIONAL_LIST liblz4-devel ||
 echo "lz4 devel is unavailable" >&2
@@ -219,10 +212,16 @@ echo "git-review is unavailabe" >&2
 add_package ADDITIONAL_LIST speexdsp-devel || add_package ADDITIONAL_LIST speex-devel ||
 echo "speex is unavailable" >&2
 
+add_package ADDITIONAL_LIST libnl3-devel || add_package ADDITIONAL_LIST libnl-devel ||
+echo "libnl3/libnl are unavailable" >&2
+
+add_package ADDITIONAL_LIST ilbc-devel ||
+echo "ilbc is unavailable" >&2
+
 ACTUAL_LIST=$BASIC_LIST
 
 # Now arrange for optional support libraries
-if [ $ADDITIONAL ]
+if [ $ADDITIONAL -ne 0 ]
 then
 	ACTUAL_LIST="$ACTUAL_LIST $ADDITIONAL_LIST"
 fi
@@ -230,7 +229,7 @@ fi
 $PM $PM_OPT install $ACTUAL_LIST $OPTIONS
 
 # Now arrange for optional support libraries
-if [ ! $ADDITIONAL ]
+if [ $ADDITIONAL -eq 0 ]
 then
 	echo -e "\n*** Optional packages not installed. Rerun with --install-optional to have them.\n"
 fi

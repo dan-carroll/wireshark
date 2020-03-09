@@ -36,7 +36,6 @@ public:
     void autoScrollTo(const QModelIndex &index);
     void goToHfid(int hfid);
     void clear();
-    void closeContextMenu();
     void restoreSelectedField();
     QString toString(const QModelIndex &start_idx = QModelIndex()) const;
 
@@ -46,10 +45,9 @@ protected:
         Name = 0,
         Description,
         Value
-    } CopyInfos;
+    };
 
     virtual void contextMenuEvent(QContextMenuEvent *event);
-    void protoTreeContextMenu(QContextMenuEvent * event);
     virtual void timerEvent(QTimerEvent *event);
     virtual void keyReleaseEvent(QKeyEvent *event);
     virtual bool eventFilter(QObject * obj, QEvent * ev);
@@ -59,13 +57,10 @@ protected:
 
 private:
     ProtoTreeModel *proto_tree_model_;
-    QMenu ctx_menu_;
     QMenu conv_menu_;
     QMenu colorize_menu_;
     ProtocolPreferencesMenu proto_prefs_menu_;
-    QAction *decode_as_;
     QList<QAction *> copy_actions_;
-    QFont mono_font_;
     int column_resize_timer_;
     QList<QPair<int,int> > selected_hfid_path_; // row, hfinfo
 
@@ -96,8 +91,10 @@ public slots:
     void collapseSubtrees();
     void expandAll();
     void collapseAll();
+    void itemClicked(const QModelIndex & index);
     void itemDoubleClicked(const QModelIndex & index);
     void selectedFieldChanged(FieldInformation *);
+    void selectedFrameChanged(QList<int>);
 
 protected slots:
     void selectionChanged(const QItemSelection &selected, const QItemSelection &deselected);
@@ -112,6 +109,7 @@ protected slots:
 
 private slots:
     void updateContentWidth();
+    void connectToMainWindow();
 };
 
 #endif // PROTO_TREE_H

@@ -39,8 +39,9 @@ protected:
     void showEvent(QShowEvent *);
 
 private slots:
-    void copyFromProfile(QAction *action);
+    void copyFromProfile(QString fileName);
     void colorRuleSelectionChanged(const QItemSelection &selected, const QItemSelection &deselected);
+    void colorChanged(bool foreground, const QColor &cc);
     void on_fGPushButton_clicked();
     void on_bGPushButton_clicked();
     void on_displayFilterPushButton_clicked();

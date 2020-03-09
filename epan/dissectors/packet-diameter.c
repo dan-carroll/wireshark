@@ -281,6 +281,10 @@ static int hf_diameter_3gpp_mip6_feature_vector_assign_local_ip = -1;
 static int hf_diameter_3gpp_mip6_feature_vector_mip4_supported = -1;
 static int hf_diameter_3gpp_mip6_feature_vector_optimized_idle_mode_mobility = -1;
 static int hf_diameter_3gpp_mip6_feature_vector_gtpv2_supported = -1;
+static int hf_diameter_user_equipment_info_imeisv = -1;
+static int hf_diameter_user_equipment_info_mac = -1;
+static int hf_diameter_user_equipment_info_eui64 = -1;
+static int hf_diameter_user_equipment_info_modified_eui64 = -1;
 
 static gint ett_diameter = -1;
 static gint ett_diameter_flags = -1;
@@ -297,11 +301,13 @@ static expert_field ei_diameter_avp_no_data = EI_INIT;
 static expert_field ei_diameter_application_id = EI_INIT;
 static expert_field ei_diameter_version = EI_INIT;
 static expert_field ei_diameter_avp_pad = EI_INIT;
+static expert_field ei_diameter_avp_pad_missing = EI_INIT;
 static expert_field ei_diameter_code = EI_INIT;
 static expert_field ei_diameter_avp_code = EI_INIT;
 static expert_field ei_diameter_avp_vendor_id = EI_INIT;
 static expert_field ei_diameter_invalid_ipv6_prefix_len = EI_INIT;
 static expert_field ei_diameter_invalid_avp_len = EI_INIT;
+static expert_field ei_diameter_invalid_user_equipment_info_value_len = EI_INIT;
 
 /* Tap for Diameter */
 static int diameter_tap = -1;
@@ -342,7 +348,12 @@ static const char *avpflags_str[] = {
 #define SUBSCRIPTION_ID_TYPE_NAI	3
 #define SUBSCRIPTION_ID_TYPE_PRIVATE	4
 #define SUBSCRIPTION_ID_TYPE_UNKNOWN (guint32)-1
-static guint32 subscription_id_type;
+
+#define USER_EQUIPMENT_INFO_TYPE_IMEISV			0
+#define USER_EQUIPMENT_INFO_TYPE_MAC			1
+#define USER_EQUIPMENT_INFO_TYPE_EUI64			2
+#define USER_EQUIPMENT_INFO_TYPE_MODIFIED_EUI64	3
+#define USER_EQUIPMENT_INFO_TYPE_UNKNOWN (guint32)-1
 
 static void
 export_diameter_pdu(packet_info *pinfo, tvbuff_t *tvb)
@@ -614,29 +625,32 @@ dissect_diameter_mip6_feature_vector(tvbuff_t *tvb, packet_info *pinfo _U_, prot
 
 /* AVP Code: 443 Subscription-Id */
 static int
-dissect_diameter_subscription_id(tvbuff_t *tvb _U_, packet_info *pinfo _U_, proto_tree *tree _U_, void *data _U_)
+dissect_diameter_subscription_id(tvbuff_t *tvb _U_, packet_info *pinfo _U_, proto_tree *tree _U_, void *data)
 {
 	/* Just reset our global subscription-id-type variable */
-	subscription_id_type = SUBSCRIPTION_ID_TYPE_UNKNOWN;
+	diam_sub_dis_t *diam_sub_dis_inf = (diam_sub_dis_t*)data;
+	diam_sub_dis_inf->subscription_id_type = SUBSCRIPTION_ID_TYPE_UNKNOWN;
 
 	return 0;
 }
 
 /* AVP Code: 450 Subscription-Id-Type */
 static int
-dissect_diameter_subscription_id_type(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree _U_, void *data _U_)
+dissect_diameter_subscription_id_type(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree _U_, void *data)
 {
-	/* Store the Type for use when we dissect Subscription-Id-Data */
-	subscription_id_type = tvb_get_ntohl(tvb, 0);
+	diam_sub_dis_t *diam_sub_dis_inf = (diam_sub_dis_t*)data;
+	diam_sub_dis_inf->subscription_id_type = tvb_get_ntohl(tvb, 0);
 
 	return 0;
 }
 
 /* AVP Code: 444 Subscription-Id-Data */
 static int
-dissect_diameter_subscription_id_data(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
+dissect_diameter_subscription_id_data(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
 {
 	guint32 str_len;
+	diam_sub_dis_t *diam_sub_dis_inf = (diam_sub_dis_t*)data;
+	guint32 subscription_id_type = diam_sub_dis_inf->subscription_id_type;
 
 	switch (subscription_id_type) {
 	case SUBSCRIPTION_ID_TYPE_IMSI:
@@ -647,6 +661,74 @@ dissect_diameter_subscription_id_data(tvbuff_t *tvb, packet_info *pinfo, proto_t
 		str_len = tvb_reported_length(tvb);
 		dissect_e164_msisdn(tvb, tree, 0, str_len, E164_ENC_UTF8);
 		return str_len;
+	}
+
+	return 0;
+}
+
+/* AVP Code: 458 User-Equipment-Info */
+static int
+dissect_diameter_user_equipment_info(tvbuff_t *tvb _U_, packet_info *pinfo _U_, proto_tree *tree _U_, void *data)
+{
+	/* Just reset our global subscription-id-type variable */
+	diam_sub_dis_t *diam_sub_dis_inf = (diam_sub_dis_t*)data;
+	diam_sub_dis_inf->user_equipment_info_type = USER_EQUIPMENT_INFO_TYPE_UNKNOWN;
+
+	return 0;
+}
+
+/* AVP Code: 459 User-Equipment-Info-Type */
+/* RFC 8506 section 8.50 */
+static int
+dissect_diameter_user_equipment_info_type(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree _U_, void *data)
+{
+	diam_sub_dis_t *diam_sub_dis_inf = (diam_sub_dis_t*)data;
+	diam_sub_dis_inf->user_equipment_info_type = tvb_get_ntohl(tvb, 0);
+
+	return 0;
+}
+
+/* AVP Code: 460 User-Equipment-Info-Value */
+/* RFC 8506 section 8.51 */
+static int
+dissect_diameter_user_equipment_info_value(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
+{
+	guint32 len;
+	diam_sub_dis_t *diam_sub_dis_inf = (diam_sub_dis_t*)data;
+	guint32 user_equipment_info_type = diam_sub_dis_inf->user_equipment_info_type;
+
+	switch (user_equipment_info_type) {
+	case USER_EQUIPMENT_INFO_TYPE_IMEISV:
+		/* RFC 8506 section 8.53, 3GPP TS 23.003 */
+		len = tvb_reported_length(tvb);
+		proto_tree_add_item(tree, hf_diameter_user_equipment_info_imeisv, tvb, 0, len, ENC_ASCII|ENC_NA);
+		return len;
+	case USER_EQUIPMENT_INFO_TYPE_MAC:
+		/* RFC 8506 section 8.54, RFC 5777 section 4.1.7.8 */
+		len = tvb_reported_length(tvb);
+		if (len == 6) {
+			proto_tree_add_item(tree, hf_diameter_user_equipment_info_mac, tvb, 0, len, ENC_NA);
+			return len;
+		}
+		proto_tree_add_expert(tree, pinfo, &ei_diameter_invalid_user_equipment_info_value_len, tvb, 0, len);
+		break;
+	case USER_EQUIPMENT_INFO_TYPE_EUI64:
+		/* RFC 8506 section 8.55 */
+		len = tvb_reported_length(tvb);
+		if (len == 8) {
+			proto_tree_add_item(tree, hf_diameter_user_equipment_info_eui64, tvb, 0, len, ENC_BIG_ENDIAN);
+			return len;
+		}
+		proto_tree_add_expert(tree, pinfo, &ei_diameter_invalid_user_equipment_info_value_len, tvb, 0, len);
+		break;
+	case USER_EQUIPMENT_INFO_TYPE_MODIFIED_EUI64:
+		/* RFC 8506 section 8.56, RFC 4291 */
+		len = tvb_reported_length(tvb);
+		if (len == 16) {
+			proto_tree_add_item(tree, hf_diameter_user_equipment_info_modified_eui64, tvb, 0, len,  ENC_NA);
+			return len;
+		}
+		proto_tree_add_expert(tree, pinfo, &ei_diameter_invalid_user_equipment_info_value_len, tvb, 0, len);
 		break;
 	}
 
@@ -691,7 +773,7 @@ call_avp_subdissector(guint32 vendorid, guint32 code, tvbuff_t *subtvb, packet_i
 
 /* Dissect an AVP at offset */
 static int
-dissect_diameter_avp(diam_ctx_t *c, tvbuff_t *tvb, int offset, diam_sub_dis_t *diam_sub_dis_inf)
+dissect_diameter_avp(diam_ctx_t *c, tvbuff_t *tvb, int offset, diam_sub_dis_t *diam_sub_dis_inf, gboolean update_col_info)
 {
 	guint32 code           = tvb_get_ntohl(tvb,offset);
 	guint32 len            = tvb_get_ntohl(tvb,offset+4);
@@ -762,6 +844,13 @@ dissect_diameter_avp(diam_ctx_t *c, tvbuff_t *tvb, int offset, diam_sub_dis_t *d
 		return tvb_reported_length(tvb);
 	}
 
+	/*
+	 * Workaround for a MS-CHAPv2 capture from Bug 15603 that lacks padding.
+	 */
+	if (tvb_reported_length_remaining(tvb, offset + len) < pad_len) {
+		pad_len = (guint32)tvb_reported_length_remaining(tvb, offset + len);
+	}
+
 	/* Add root of tree for this AVP */
 	avp_item = proto_tree_add_item(c->tree, hf_diameter_avp, tvb, offset, len + pad_len, ENC_NA);
 	avp_tree = proto_item_add_subtree(avp_item, a->ett);
@@ -781,6 +870,9 @@ dissect_diameter_avp(diam_ctx_t *c, tvbuff_t *tvb, int offset, diam_sub_dis_t *d
 	offset += 4;
 
 	proto_item_set_text(avp_item,"AVP: %s(%u) l=%u f=%s", code_str, code, len, avpflags_str[flags_bits_idx]);
+	if (update_col_info) {
+		col_append_fstr(c->pinfo->cinfo, COL_INFO, " %s", code_str);
+	}
 
 	/* Flags */
 	{
@@ -887,6 +979,9 @@ dissect_diameter_avp(diam_ctx_t *c, tvbuff_t *tvb, int offset, diam_sub_dis_t *d
 				break;
 			}
 		}
+	}
+	if ((len + pad_len) % 4) {
+		proto_tree_add_expert(avp_tree, c->pinfo, &ei_diameter_avp_pad_missing, tvb, offset, pad_len);
 	}
 
 	return len+pad_len;
@@ -1225,7 +1320,7 @@ grouped_avp(diam_ctx_t *c, diam_avp_t *a, tvbuff_t *tvb, diam_sub_dis_t *diam_su
 	/* Set the flag that we are dissecting a grouped AVP */
 	diam_sub_dis_inf->dis_gouped = TRUE;
 	while (offset < len) {
-		offset += dissect_diameter_avp(c, tvb, offset, diam_sub_dis_inf);
+		offset += dissect_diameter_avp(c, tvb, offset, diam_sub_dis_inf, FALSE);
 	}
 	/* Clear info collected in grouped AVP */
 	diam_sub_dis_inf->vendor_id  = 0;
@@ -1277,6 +1372,10 @@ dissect_diameter_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, voi
 	proto_item *it;
 	nstime_t ns;
 	diam_sub_dis_t *diam_sub_dis_inf = wmem_new0(wmem_packet_scope(), diam_sub_dis_t);
+
+	/* Set default value Subscription-Id-Type and User-Equipment-Info-Type as XXX_UNKNOWN */
+	diam_sub_dis_inf->subscription_id_type = SUBSCRIPTION_ID_TYPE_UNKNOWN;
+	diam_sub_dis_inf->user_equipment_info_type = USER_EQUIPMENT_INFO_TYPE_UNKNOWN;
 
 	/* Load header fields if not already done */
 	if (hf_diameter_code == -1)
@@ -1477,7 +1576,7 @@ dissect_diameter_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, voi
 
 	/* Dissect AVPs until the end of the packet is reached */
 	while (offset < packet_len) {
-		offset += dissect_diameter_avp(c, tvb, offset, diam_sub_dis_inf);
+		offset += dissect_diameter_avp(c, tvb, offset, diam_sub_dis_inf, FALSE);
 	}
 
 	/* Handle requests for which no answers were found and
@@ -1584,6 +1683,34 @@ dissect_diameter_tcp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *
 	return tvb_reported_length(tvb);
 }
 
+static int
+dissect_diameter_avps(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
+{
+	proto_item *pi;
+	proto_tree *diam_tree;
+	int offset = 0;
+	diam_ctx_t *c = (diam_ctx_t *)wmem_alloc0(wmem_packet_scope(), sizeof(diam_ctx_t));
+	diam_sub_dis_t *diam_sub_dis_inf = wmem_new0(wmem_packet_scope(), diam_sub_dis_t);
+
+	/* Load header fields if not already done */
+	if (hf_diameter_code == -1)
+		proto_registrar_get_byname("diameter.code");
+
+	col_set_str(pinfo->cinfo, COL_PROTOCOL, "DIAMETER");
+	col_set_str(pinfo->cinfo, COL_INFO, "AVPs:");
+
+	pi = proto_tree_add_item(tree, proto_diameter, tvb, 0, -1, ENC_NA);
+	diam_tree = proto_item_add_subtree(pi, ett_diameter);
+	c->tree = diam_tree;
+	c->pinfo = pinfo;
+	c->version_rfc = TRUE;
+
+	/* Dissect AVPs until the end of the packet is reached */
+	while (tvb_reported_length_remaining(tvb, offset)) {
+		offset += dissect_diameter_avp(c, tvb, offset, diam_sub_dis_inf, TRUE);
+	}
+	return tvb_reported_length(tvb);
+}
 
 static char *
 alnumerize(char *name)
@@ -2338,7 +2465,15 @@ real_register_diameter_fields(void)
 		FT_BOOLEAN, 64, TFS(&tfs_set_notset), 0x0000200000000000, NULL, HFILL }},
 	{ &hf_diameter_3gpp_mip6_feature_vector_gtpv2_supported,
 		{ "GTPv2_SUPPORTED", "diameter.3gpp.mip6_feature_vector.gtpv2_supported",
-		FT_BOOLEAN, 64, TFS(&tfs_set_notset), 0x0000400000000000, NULL, HFILL }}
+		FT_BOOLEAN, 64, TFS(&tfs_set_notset), 0x0000400000000000, NULL, HFILL }},
+	{ &hf_diameter_user_equipment_info_imeisv,
+		{ "IMEISV","diameter.user_equipment_info.imeisv", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL }},
+	{ &hf_diameter_user_equipment_info_mac,
+		{ "MAC","diameter.user_equipment_info.mac", FT_ETHER, BASE_NONE, NULL, 0x0, NULL, HFILL }},
+	{ &hf_diameter_user_equipment_info_eui64,
+		{ "EUI64","diameter.user_equipment_info.eui64", FT_EUI64, BASE_NONE, NULL, 0x0, NULL, HFILL }},
+	{ &hf_diameter_user_equipment_info_modified_eui64,
+		{ "Modified EUI64","diameter.user_equipment_info.modified_eui64", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL }}
 	};
 
 	gint *ett_base[] = {
@@ -2359,12 +2494,14 @@ real_register_diameter_fields(void)
 		{ &ei_diameter_avp_vendor_id, { "diameter.unknown_vendor", PI_UNDECODED, PI_WARN, "Unknown Vendor, if you know whose this is you can add it to dictionary.xml", EXPFILL }},
 		{ &ei_diameter_avp_no_data, { "diameter.avp.no_data", PI_UNDECODED, PI_WARN, "Data is empty", EXPFILL }},
 		{ &ei_diameter_avp_pad, { "diameter.avp.pad.non_zero", PI_MALFORMED, PI_NOTE, "Padding is non-zero", EXPFILL }},
+		{ &ei_diameter_avp_pad_missing, { "diameter.avp.pad.missing", PI_MALFORMED, PI_NOTE, "Padding is missing", EXPFILL }},
 		{ &ei_diameter_avp_len, { "diameter.avp.invalid-len", PI_MALFORMED, PI_WARN, "Wrong length", EXPFILL }},
 		{ &ei_diameter_application_id, { "diameter.applicationId.unknown", PI_UNDECODED, PI_WARN, "Unknown Application Id, if you know what this is you can add it to dictionary.xml", EXPFILL }},
 		{ &ei_diameter_version, { "diameter.version.unknown", PI_UNDECODED, PI_WARN, "Unknown Diameter Version (decoding as RFC 3588)", EXPFILL }},
 		{ &ei_diameter_code, { "diameter.cmd.code.unknown", PI_UNDECODED, PI_WARN, "Unknown command, if you know what this is you can add it to dictionary.xml", EXPFILL }},
 		{ &ei_diameter_invalid_ipv6_prefix_len, { "diameter.invalid_ipv6_prefix_len", PI_MALFORMED, PI_ERROR, "Invalid IPv6 Prefix length", EXPFILL }},
-		{ &ei_diameter_invalid_avp_len,{ "diameter.invalid_avp_len", PI_MALFORMED, PI_ERROR, "Invalid AVP length", EXPFILL }}
+		{ &ei_diameter_invalid_avp_len,{ "diameter.invalid_avp_len", PI_MALFORMED, PI_ERROR, "Invalid AVP length", EXPFILL }},
+		{ &ei_diameter_invalid_user_equipment_info_value_len,{ "diameter.invalid_user_equipment_info_value_len", PI_MALFORMED, PI_ERROR, "Invalid User-Equipment-Info-Value length", EXPFILL }}
 	};
 
 	wmem_array_append(build_dict.hf, hf_base, array_length(hf_base));
@@ -2407,6 +2544,8 @@ proto_register_diameter(void)
 
 	/* Allow dissector to find be found by name. */
 	diameter_sctp_handle = register_dissector("diameter", dissect_diameter, proto_diameter);
+	/* Diameter AVPs without Diameter header, for EAP-TTLS (RFC 5281, Section 10) */
+	register_dissector("diameter_avps", dissect_diameter_avps, proto_diameter);
 
 	/* Delay registration of Diameter fields */
 	proto_register_prefix("diameter", register_diameter_fields);
@@ -2478,6 +2617,9 @@ proto_reg_handoff_diameter(void)
 		/* AVP Code: 1 User-Name */
 		dissector_add_uint("diameter.base", 1, create_dissector_handle(dissect_diameter_user_name, proto_diameter));
 
+		/* AVP Code: 79 EAP-Message (defined in RFC 2869, but used for EAP-TTLS, RFC 5281) */
+		dissector_add_uint("diameter.base", 79, create_dissector_handle(dissect_diameter_eap_payload, proto_diameter));
+
 		/* AVP Code: 97 Framed-IPv6-Address */
 		dissector_add_uint("diameter.base", 97, create_dissector_handle(dissect_diameter_base_framed_ipv6_prefix, proto_diameter));
 
@@ -2498,6 +2640,15 @@ proto_reg_handoff_diameter(void)
 
 		/* AVP Code: 444 Subscription-Id-Data */
 		dissector_add_uint("diameter.base", 444, create_dissector_handle(dissect_diameter_subscription_id_data, proto_diameter));
+
+		/* AVP Code: 458 User-Equipment-Info */
+		dissector_add_uint("diameter.base", 458, create_dissector_handle(dissect_diameter_user_equipment_info, proto_diameter));
+
+		/* AVP Code: 459 User-Equipment-Info-Type */
+		dissector_add_uint("diameter.base", 459, create_dissector_handle(dissect_diameter_user_equipment_info_type, proto_diameter));
+
+		/* AVP Code: 460 User-Equipment-Info-Value */
+		dissector_add_uint("diameter.base", 460, create_dissector_handle(dissect_diameter_user_equipment_info_value, proto_diameter));
 
 		/* AVP Code: 462 EAP-Payload */
 		dissector_add_uint("diameter.base", 462, create_dissector_handle(dissect_diameter_eap_payload, proto_diameter));

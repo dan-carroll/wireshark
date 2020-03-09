@@ -300,7 +300,7 @@ if_info_get(const char *name)
 		 */
 		for (;;) {
 			g_free(description);
-			if ((description = g_malloc(descrlen)) != NULL) {
+			if ((description = (char*)g_malloc(descrlen)) != NULL) {
 				ifrdesc.ifr_buffer.buffer = description;
 				ifrdesc.ifr_buffer.length = descrlen;
 				if (ioctl(s, SIOCGIFDESCR, &ifrdesc) == 0) {
@@ -327,7 +327,7 @@ if_info_get(const char *name)
 		 * to get the description length - it's clamped
 		 * to a maximum of IFDESCRSIZE.
 		 */
-		if ((description = g_malloc(descrlen)) != NULL) {
+		if ((description = (char*)g_malloc(descrlen)) != NULL) {
 			ifrdesc.ifr_data = (caddr_t)description;
 			if (ioctl(s, SIOCGIFDESCR, &ifrdesc) != 0) {
 				/*
@@ -823,12 +823,13 @@ linktype_name_to_val(const char *linktype)
  * rest-of-the-universe libpcap.
  */
 int
-get_pcap_datalink(pcap_t *pch, const char *devicename
-#ifndef _AIX
-    _U_)
+get_pcap_datalink(pcap_t *pch,
+#ifdef _AIX
+    const char* devicename
 #else
-    )
+    const char* devicename _U_
 #endif
+    )
 {
 	int datalink;
 #ifdef _AIX
@@ -1257,11 +1258,11 @@ get_if_capabilities_pcap_create(interface_options *interface_opts,
 }
 
 pcap_t *
-open_capture_device_pcap_create(capture_options *capture_opts
-#if defined(HAVE_PCAP_SET_TSTAMP_PRECISION) || defined (HAVE_PCAP_SET_TSTAMP_TYPE)
-    ,
+open_capture_device_pcap_create(
+#if defined(HAVE_PCAP_SET_TSTAMP_PRECISION)
+    capture_options* capture_opts,
 #else
-    _U_,
+    capture_options* capture_opts _U_,
 #endif
     interface_options *interface_opts, int timeout,
     cap_device_open_err *open_err,

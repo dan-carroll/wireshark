@@ -22,9 +22,10 @@
 
 #include "wireshark_application.h"
 #include "ui/qt/utils/qt_ui_utils.h"
-#include "ui/qt/widgets/copy_from_profile_menu.h"
+#include "ui/qt/widgets/copy_from_profile_button.h"
 #include "ui/qt/widgets/wireshark_file_dialog.h"
 
+#include <functional>
 #include <QColorDialog>
 #include <QMessageBox>
 #include <QPushButton>
@@ -79,7 +80,7 @@ ColoringRulesDialog::ColoringRulesDialog(QWidget *parent, QString add_filter) :
             this, SLOT(invalidField(const QModelIndex&, const QString&)));
     connect(&colorRuleDelegate_, SIGNAL(validField(const QModelIndex&)),
             this, SLOT(validField(const QModelIndex&)));
-    connect(ui->coloringRulesTreeView, &QTreeView::clicked, this, &ColoringRulesDialog::treeItemClicked );
+    connect(ui->coloringRulesTreeView, &QTreeView::clicked, this, &ColoringRulesDialog::treeItemClicked);
     connect(&colorRuleModel_, SIGNAL(rowsInserted(const QModelIndex &, int, int)), this, SLOT(rowCountChanged()));
     connect(&colorRuleModel_, SIGNAL(rowsRemoved(const QModelIndex &, int, int)), this, SLOT(rowCountChanged()));
 
@@ -90,12 +91,9 @@ ColoringRulesDialog::ColoringRulesDialog(QWidget *parent, QString add_filter) :
     export_button_ = ui->buttonBox->addButton(tr("Export" UTF8_HORIZONTAL_ELLIPSIS), QDialogButtonBox::ApplyRole);
     export_button_->setToolTip(tr("Save filters in a file."));
 
-    QPushButton *copy_button = ui->buttonBox->addButton(tr("Copy from"), QDialogButtonBox::ActionRole);
-    CopyFromProfileMenu *copy_from_menu = new CopyFromProfileMenu(COLORFILTERS_FILE_NAME, copy_button);
-    copy_button->setMenu(copy_from_menu);
-    copy_button->setToolTip(tr("Copy coloring rules from another profile."));
-    copy_button->setEnabled(copy_from_menu->haveProfiles());
-    connect(copy_from_menu, SIGNAL(triggered(QAction *)), this, SLOT(copyFromProfile(QAction *)));
+    CopyFromProfileButton * copy_button = new CopyFromProfileButton(this, COLORFILTERS_FILE_NAME, tr("Copy coloring rules from another profile."));
+    ui->buttonBox->addButton(copy_button, QDialogButtonBox::ActionRole);
+    connect(copy_button, &CopyFromProfileButton::copyProfile, this, &ColoringRulesDialog::copyFromProfile);
 
     QString abs_path = gchar_free_to_qstring(get_persconffile_path(COLORFILTERS_FILE_NAME, TRUE));
     if (file_exists(abs_path.toUtf8().constData())) {
@@ -130,20 +128,21 @@ ColoringRulesDialog::~ColoringRulesDialog()
 void ColoringRulesDialog::checkUnknownColorfilters()
 {
     if (prefs.unknown_colorfilters) {
-        QMessageBox mb;
-        mb.setText(tr("Your coloring rules file contains unknown rules"));
-        mb.setInformativeText(tr("Wireshark doesn't recognize one or more of your coloring rules. "
+        QMessageBox *mb = new QMessageBox();
+        mb->setText(tr("Your coloring rules file contains unknown rules"));
+        mb->setInformativeText(tr("Wireshark doesn't recognize one or more of your coloring rules. "
                                  "They have been disabled."));
-        mb.setStandardButtons(QMessageBox::Ok);
+        mb->setStandardButtons(QMessageBox::Ok);
 
-        mb.exec();
+        mb->setWindowModality(Qt::ApplicationModal);
+        mb->setAttribute(Qt::WA_DeleteOnClose);
+        mb->show();
         prefs.unknown_colorfilters = FALSE;
     }
 }
 
-void ColoringRulesDialog::copyFromProfile(QAction *action)
+void ColoringRulesDialog::copyFromProfile(QString filename)
 {
-    QString filename = action->data().toString();
     QString err;
 
     if (!colorRuleModel_.importColors(filename, err)) {
@@ -186,7 +185,7 @@ bool ColoringRulesDialog::isValidFilter(QString filter, QString * error)
     }
     dfilter_free(dfp);
 
-    if ( err_msg )
+    if (err_msg)
     {
         error->append(err_msg);
         g_free(err_msg);
@@ -209,16 +208,16 @@ void ColoringRulesDialog::treeItemClicked(const QModelIndex &index)
     {
         QList<QModelIndex> keys = errors_.keys();
         bool update = false;
-        foreach ( QModelIndex key, keys )
+        foreach (QModelIndex key, keys)
         {
-            if ( key.row() == index.row() )
+            if (key.row() == index.row())
             {
                 errors_.remove(key);
                 update = true;
             }
         }
 
-        if ( update )
+        if (update)
             updateHint(index);
     }
 }
@@ -233,16 +232,16 @@ void ColoringRulesDialog::validField(const QModelIndex &index)
 {
     QList<QModelIndex> keys = errors_.keys();
     bool update = false;
-    foreach ( QModelIndex key, keys )
+    foreach (QModelIndex key, keys)
     {
-        if ( key.row() == index.row() )
+        if (key.row() == index.row())
         {
             errors_.remove(key);
             update = true;
         }
     }
 
-    if ( update )
+    if (update)
         updateHint(index);
 }
 
@@ -269,10 +268,10 @@ void ColoringRulesDialog::updateHint(QModelIndex idx)
         hint += tr("Double click to edit. Drag to move. Rules are processed in order until a match is found.");
     } else {
         hint += error_text;
-        if ( idx.isValid() )
+        if (idx.isValid())
         {
             QModelIndex fiIdx = ui->coloringRulesTreeView->model()->index(idx.row(), ColoringRulesModel::colName);
-            if ( fiIdx.data(Qt::CheckStateRole).toInt() == Qt::Checked )
+            if (fiIdx.data(Qt::CheckStateRole).toInt() == Qt::Checked)
                 enable_save = false;
         }
         else
@@ -340,13 +339,23 @@ void ColoringRulesDialog::changeColor(bool foreground)
     if (!current.isValid())
         return;
 
-    QColorDialog color_dlg;
+    QColorDialog *color_dlg = new QColorDialog();
+    color_dlg->setCurrentColor(colorRuleModel_.data(current, foreground ? Qt::ForegroundRole : Qt::BackgroundRole).toString());
 
-    color_dlg.setCurrentColor(colorRuleModel_.data(current, foreground ? Qt::ForegroundRole : Qt::BackgroundRole).toString());
-    if (color_dlg.exec() == QDialog::Accepted) {
-        colorRuleModel_.setData(current, color_dlg.currentColor(), foreground ? Qt::ForegroundRole : Qt::BackgroundRole);
-        setColorButtons(current);
-    }
+    connect(color_dlg, &QColorDialog::colorSelected, std::bind(&ColoringRulesDialog::colorChanged, this, foreground, std::placeholders::_1));
+    color_dlg->setWindowModality(Qt::ApplicationModal);
+    color_dlg->setAttribute(Qt::WA_DeleteOnClose);
+    color_dlg->show();
+}
+
+void ColoringRulesDialog::colorChanged(bool foreground, const QColor &cc)
+{
+    QModelIndex current = ui->coloringRulesTreeView->currentIndex();
+    if (!current.isValid())
+        return;
+
+    colorRuleModel_.setData(current, cc, foreground ? Qt::ForegroundRole : Qt::BackgroundRole);
+    setColorButtons(current);
 }
 
 void ColoringRulesDialog::on_fGPushButton_clicked()
@@ -435,6 +444,8 @@ void ColoringRulesDialog::on_buttonBox_clicked(QAbstractButton *button)
             if (!colorRuleModel_.importColors(file_name, err)) {
                 simple_dialog(ESD_TYPE_ERROR, ESD_BTN_OK, "%s", err.toUtf8().constData());
             }
+
+            checkUnknownColorfilters();
         }
     } else if (button == export_button_) {
         int num_items = ui->coloringRulesTreeView->selectionModel()->selectedIndexes().count()/colorRuleModel_.columnCount();

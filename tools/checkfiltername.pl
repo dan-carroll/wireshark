@@ -345,6 +345,7 @@ sub is_proto_dup_whitelist {
 	if (($_[0] eq "nfs") && (index($_[1], "nfs") >= 0)) {return 1;}
 	if (($_[0] eq "oxid") && (index($_[1], "oxid") >= 0)) {return 1;}
 	if (($_[0] eq "rquota") && (index($_[1], "rquota") >= 0)) {return 1;}
+	if (($_[0] eq "pfcp") && (index($_[1], "pfcp") >= 0)) {return 1;}
 	if (($_[0] eq "sm") && (index($_[1], "sm_") >= 0)) {return 1;}
 	if (($_[0] eq "smpp") && (index($_[1], "smppplus") >= 0)) {return 1;}
 	if (($_[0] eq "spray") && (index($_[1], "sprayarr") >= 0)) {return 1;}
@@ -399,6 +400,7 @@ sub is_from_other_protocol_whitelist {
 	if (($proto_filename eq "packet-glusterfs.c") && (index($_[0], "gluster") >= 0)) {return 1;}
 	if (($proto_filename eq "packet-h248_annex_e.c") && (index($_[0], "h248") >= 0)) {return 1;}
 	if (($proto_filename eq "packet-h248_q1950.c") && (index($_[0], "h248") >= 0)) {return 1;}
+	if (($proto_filename eq "packet-ieee1722.c") && (index($_[0], "can") >= 0)) {return 1;}
 	if (($proto_filename eq "packet-ieee80211.c") && (index($_[0], "eapol") >= 0)) {return 1;}
 	if (($proto_filename eq "packet-ieee80211-radio.c") && (index($_[0], "wlan") >= 0)) {return 1;}
 	if (($proto_filename eq "packet-ieee80211-wlancap.c") && (index($_[0], "wlan") >= 0)) {return 1;}

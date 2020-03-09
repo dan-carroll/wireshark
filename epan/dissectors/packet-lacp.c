@@ -188,6 +188,14 @@ dissect_lacp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_
     col_set_str(pinfo->cinfo, COL_PROTOCOL, "LACP");
     col_set_str(pinfo->cinfo, COL_INFO, "Link Aggregation Control Protocol");
 
+    /* FIXME
+     * Validate that the destination MAC address is one of the following
+     * (IEEE 802.1AX-2014 6.2.11.2):
+     * 01-80-C2-00-00-00: Nearest Customer Bridge group address
+     * 01-80-C2-00-00-02: IEEE 802.3 Slow_Protocols_Mulitcast group address
+     * 01-80-C2-00-00-03: Nearest non-TPMR Bridge group address
+     */
+
     /* Add LACP Heading - Note: 1 byte for slowprotocol has been consumed already */
     lacp_item = proto_tree_add_protocol_format(tree, proto_lacp, tvb,
                                                  0, -1, "Link Aggregation Control Protocol");
@@ -342,11 +350,11 @@ dissect_lacp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_
 
     length_remaining = tvb_reported_length_remaining(tvb, offset);
     if (length_remaining) {
-        proto_tree_add_item(lacp_tree, hf_lacp_vendor, tvb, offset, length_remaining, ENC_NA);
 
         /* HP LACP MAD IRF, first bytes is always 0x64 and second bytes is the rest of length */
         if (length_remaining > 2 && (tvb_get_guint8(tvb, offset) == 0x64) && ((length_remaining -2) == tvb_get_guint8(tvb, offset+1)) )
         {
+            proto_tree_add_item(lacp_tree, hf_lacp_vendor, tvb, offset, length_remaining, ENC_NA);
             proto_tree_add_item(lacp_tree, hf_lacp_vendor_hp_unknown, tvb, offset, 1, ENC_NA);
             offset += 1;
 
@@ -372,14 +380,13 @@ dissect_lacp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_
             offset += 2;
 
             proto_tree_add_item(lacp_tree, hf_lacp_vendor_hp_unknown, tvb, offset, 2, ENC_NA);
-            offset += 2;
-
         } else {
-            offset += length_remaining;
+            /* Not the HP specific extras.  Don't claim the remaining data.  It may actually be an ethernet trailer. */
+            set_actual_length(tvb, tvb_captured_length(tvb) - length_remaining);
+            proto_item_set_len(lacp_item, tvb_captured_length(tvb));
         }
     }
-
-    return offset;
+    return tvb_captured_length(tvb);
 }
 
 /* Register the protocol with Wireshark */

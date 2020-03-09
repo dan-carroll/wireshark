@@ -11,7 +11,7 @@
 
 #include <glib.h>
 
-#include "capture_info.h"
+#include "ui/capture_info.h"
 
 #include "epan/capture_dissectors.h"
 #include "epan/proto.h"
@@ -37,7 +37,7 @@
 
 extern "C" {
 
-// Callbacks defined in capture_info.h.
+// Callbacks defined in ui/capture_info.h.
 
 /* create the capture info dialog */
 /* will keep pointers to the fields in the counts parameter */
@@ -113,7 +113,7 @@ CaptureInfoDialog::~CaptureInfoDialog()
 
 void CaptureInfoDialog::updateInfo()
 {
-    int secs = duration_.elapsed() / 1000;
+    int secs = int(duration_.elapsed() / 1000);
     QString duration = tr("%1 packets, %2:%3:%4")
             .arg(cap_info_->counts->total)
             .arg(secs / 3600, 2, 10, QChar('0'))

@@ -394,23 +394,11 @@
      <property name="title">
       <string>Apply as Filter</string>
      </property>
-     <addaction name="actionAnalyzeAAFSelected"/>
-     <addaction name="actionAnalyzeAAFNotSelected"/>
-     <addaction name="actionAnalyzeAAFAndSelected"/>
-     <addaction name="actionAnalyzeAAFOrSelected"/>
-     <addaction name="actionAnalyzeAAFAndNotSelected"/>
-     <addaction name="actionAnalyzeAAFOrNotSelected"/>
     </widget>
     <widget class="QMenu" name="menuPrepareAFilter">
      <property name="title">
       <string>Prepare a Filter</string>
      </property>
-     <addaction name="actionAnalyzePAFSelected"/>
-     <addaction name="actionAnalyzePAFNotSelected"/>
-     <addaction name="actionAnalyzePAFAndSelected"/>
-     <addaction name="actionAnalyzePAFOrSelected"/>
-     <addaction name="actionAnalyzePAFAndNotSelected"/>
-     <addaction name="actionAnalyzePAFOrNotSelected"/>
     </widget>
     <widget class="QMenu" name="menuSCTP">
      <property name="title">
@@ -427,6 +415,8 @@
      <addaction name="actionAnalyzeFollowUDPStream"/>
      <addaction name="actionAnalyzeFollowTLSStream"/>
      <addaction name="actionAnalyzeFollowHTTPStream"/>
+     <addaction name="actionAnalyzeFollowHTTP2Stream"/>
+     <addaction name="actionAnalyzeFollowQUICStream"/>
     </widget>
     <widget class="QMenu" name="menuConversationFilter">
      <property name="title">
@@ -435,6 +425,7 @@
     </widget>
     <addaction name="actionAnalyzeDisplayFilters"/>
     <addaction name="actionAnalyzeDisplayFilterMacros"/>
+    <addaction name="actionDisplayFilterExpression"/>
     <addaction name="separator"/>
     <addaction name="actionAnalyzeCreateAColumn"/>
     <addaction name="menuApplyAsFilter"/>
@@ -628,6 +619,10 @@
      <property name="title">
       <string>Copy</string>
      </property>
+     <addaction name="actionCopyListAsText"/>
+     <addaction name="actionCopyListAsCSV"/>
+     <addaction name="actionCopyListAsYAML"/>
+     <addaction name="separator"/>
      <addaction name="actionCopyAllVisibleItems"/>
      <addaction name="actionCopyAllVisibleSelectedTreeItems"/>
      <addaction name="actionEditCopyDescription"/>
@@ -766,8 +761,6 @@
    <attribute name="toolBarBreak">
     <bool>true</bool>
    </attribute>
-   <addaction name="actionDisplayFilterExpression"/>
-   <addaction name="separator"/>
    <addaction name="actionNewDisplayFilterExpression"/>
   </widget>
   <widget class="QToolBar" name="wirelessToolBar">
@@ -1316,6 +1309,21 @@
     <string notr="true">Ctrl+Alt+Shift+D</string>
    </property>
   </action>
+  <action name="actionCopyListAsText">
+   <property name="text">
+    <string>As Plain &amp;Text</string>
+   </property>
+  </action>
+  <action name="actionCopyListAsCSV">
+   <property name="text">
+    <string>As &amp;CSV</string>
+   </property>
+  </action>
+  <action name="actionCopyListAsYAML">
+   <property name="text">
+    <string>As &amp;YAML</string>
+   </property>
+  </action>
   <action name="actionCopyAllVisibleItems">
    <property name="text">
     <string>All Visible Items</string>
@@ -1360,96 +1368,6 @@
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Shift+C</string>
-   </property>
-  </action>
-  <action name="actionAnalyzeAAFSelected">
-   <property name="text">
-    <string>&amp;Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzeAAFNotSelected">
-   <property name="text">
-    <string>&amp;Not Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>Not Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzeAAFAndSelected">
-   <property name="text">
-    <string>…&amp;and Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…and Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzeAAFOrSelected">
-   <property name="text">
-    <string>…&amp;or Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…or Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzeAAFAndNotSelected">
-   <property name="text">
-    <string>…a&amp;nd not Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…and not Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzeAAFOrNotSelected">
-   <property name="text">
-    <string>…o&amp;r not Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…or not Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzePAFSelected">
-   <property name="text">
-    <string>&amp;Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzePAFNotSelected">
-   <property name="text">
-    <string>&amp;Not Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>Not Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzePAFAndSelected">
-   <property name="text">
-    <string>…&amp;and Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…and Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzePAFOrSelected">
-   <property name="text">
-    <string>…&amp;or Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…or Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzePAFAndNotSelected">
-   <property name="text">
-    <string>…a&amp;nd not Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…and not Selected</string>
-   </property>
-  </action>
-  <action name="actionAnalyzePAFOrNotSelected">
-   <property name="text">
-    <string>…o&amp;r not Selected</string>
-   </property>
-   <property name="toolTip">
-    <string>…or not Selected</string>
    </property>
   </action>
   <action name="actionAnalyzeDisplayFilters">
@@ -1508,10 +1426,10 @@
   </action>
   <action name="actionEditMarkPacket">
    <property name="text">
-    <string>&amp;Mark/Unmark Packet</string>
+    <string>&amp;Mark/Unmark Packet(s)</string>
    </property>
    <property name="toolTip">
-    <string>Mark or unmark this packet</string>
+    <string>Mark or unmark each selected packet</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+M</string>
@@ -1563,10 +1481,10 @@
   </action>
   <action name="actionEditIgnorePacket">
    <property name="text">
-    <string>&amp;Ignore/Unignore Packet</string>
+    <string>&amp;Ignore/Unignore Packet(s)</string>
    </property>
    <property name="toolTip">
-    <string>Ignore or unignore this packet</string>
+    <string>Ignore or unignore each selected packet</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+D</string>
@@ -1750,7 +1668,7 @@
     <string>Throughput</string>
    </property>
    <property name="toolTip">
-    <string>TCP througput</string>
+    <string>TCP throughput</string>
    </property>
   </action>
   <action name="actionStatisticsTcpStreamRoundTripTime">
@@ -1811,6 +1729,22 @@
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Alt+Shift+H</string>
+   </property>
+  </action>
+  <action name="actionAnalyzeFollowHTTP2Stream">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>HTTP/2 Stream</string>
+   </property>
+  </action>
+  <action name="actionAnalyzeFollowQUICStream">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>QUIC Stream</string>
    </property>
   </action>
   <action name="actionStatisticsTcpStreamTcptrace">
@@ -2681,10 +2615,10 @@
   </action>
   <action name="actionDisplayFilterExpression">
    <property name="text">
-    <string>&amp;Expression…</string>
+    <string>Display Filter &amp;Expression…</string>
    </property>
    <property name="iconText">
-    <string>Expression…</string>
+    <string>Display Filter Expression…</string>
    </property>
    <property name="toolTip">
     <string>Add an expression to the display filter.</string>

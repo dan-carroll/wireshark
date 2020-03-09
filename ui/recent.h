@@ -62,6 +62,25 @@ typedef enum {
     BYTES_ENC_EBCDIC
 } bytes_encoding_type;
 
+typedef enum {
+    SEARCH_IN_PACKET_LIST,
+    SEARCH_IN_PACKET_DETAILS,
+    SEARCH_IN_PACKET_BYTES
+} search_in_type;
+
+typedef enum {
+    SEARCH_CHAR_SET_NARROW_AND_WIDE,
+    SEARCH_CHAR_SET_NARROW,
+    SEARCH_CHAR_SET_WIDE
+} search_char_set_type;
+
+typedef enum {
+    SEARCH_TYPE_DISPLAY_FILTER,
+    SEARCH_TYPE_HEX_VALUE,
+    SEARCH_TYPE_STRING,
+    SEARCH_TYPE_REGEX
+} search_type_type;
+
 /** Recent settings. */
 typedef struct recent_settings_tag {
     gboolean    main_toolbar_show;
@@ -79,12 +98,18 @@ typedef struct recent_settings_tag {
     bytes_view_type gui_bytes_view;
     bytes_encoding_type gui_bytes_encoding;
 
+    search_in_type  gui_search_in;
+    search_char_set_type gui_search_char_set;
+    gboolean    gui_search_case_sensitive;
+    search_type_type gui_search_type;
+
     gint        gui_geometry_main_x;
     gint        gui_geometry_main_y;
     gint        gui_geometry_main_width;
     gint        gui_geometry_main_height;
 
     gboolean    gui_geometry_main_maximized;
+    gboolean    gui_geometry_leftalign_actions;
 
     gboolean    has_gui_geometry_main_upper_pane;   /* gui_geometry_main_upper_pane is valid */
     gint        gui_geometry_main_upper_pane;
@@ -95,7 +120,7 @@ typedef struct recent_settings_tag {
     gint        gui_geometry_status_pane_right;
     gint        gui_geometry_wlan_stats_pane;
     gboolean    privs_warn_if_elevated;
-    gboolean    privs_warn_if_no_npf;
+    gboolean    sys_warn_if_no_capture;
     GList      *col_width_list;                     /* column widths */
     GList      *conversation_tabs;                  /* enabled conversation dialog tabs */
     GList      *endpoint_tabs;                      /* enabled endpoint dialog tabs */
@@ -115,7 +140,7 @@ extern void recent_init(void);
 /** Cleanup/Frees recent settings (done at shutdown) */
 extern void recent_cleanup(void);
 
-/** Write recent settings file.
+/** Write recent_common settings file.
  *
  * @return TRUE if succeeded, FALSE if failed
  */

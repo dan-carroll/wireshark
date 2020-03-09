@@ -11,6 +11,7 @@
 #include <ui_search_frame.h>
 
 #include "file.h"
+#include "ui/recent.h"
 
 #include <epan/proto.h>
 #include <epan/strutil.h>
@@ -51,7 +52,9 @@ SearchFrame::SearchFrame(QWidget *parent) :
         w->setAttribute(Qt::WA_MacSmallSize, true);
     }
 #endif
-    sf_ui_->searchTypeComboBox->setCurrentIndex(df_search_);
+
+    applyRecentSearchSettings();
+
     updateWidgets();
 }
 
@@ -160,6 +163,63 @@ bool SearchFrame::regexCompile()
     return regex_ ? true : false;
 }
 
+void SearchFrame::applyRecentSearchSettings()
+{
+    int search_in_idx = in_packet_list_;
+    int char_encoding_idx = narrow_and_wide_chars_;
+    int search_type_idx = df_search_;
+
+    switch (recent.gui_search_in) {
+    case SEARCH_IN_PACKET_LIST:
+        search_in_idx = in_packet_list_;
+        break;
+    case SEARCH_IN_PACKET_DETAILS:
+        search_in_idx = in_proto_tree_;
+        break;
+    case SEARCH_IN_PACKET_BYTES:
+        search_in_idx = in_bytes_;
+        break;
+    default:
+        break;
+    }
+
+    switch (recent.gui_search_char_set) {
+    case SEARCH_CHAR_SET_NARROW_AND_WIDE:
+        char_encoding_idx = narrow_and_wide_chars_;
+        break;
+    case SEARCH_CHAR_SET_NARROW:
+        char_encoding_idx = narrow_chars_;
+        break;
+    case SEARCH_CHAR_SET_WIDE:
+        char_encoding_idx = wide_chars_;
+        break;
+    default:
+        break;
+    }
+
+    switch (recent.gui_search_type) {
+    case SEARCH_TYPE_DISPLAY_FILTER:
+        search_type_idx = df_search_;
+        break;
+    case SEARCH_TYPE_HEX_VALUE:
+        search_type_idx = hex_search_;
+        break;
+    case SEARCH_TYPE_STRING:
+        search_type_idx = string_search_;
+        break;
+    case SEARCH_TYPE_REGEX:
+        search_type_idx = regex_search_;
+        break;
+    default:
+        break;
+    }
+
+    sf_ui_->searchInComboBox->setCurrentIndex(search_in_idx);
+    sf_ui_->charEncodingComboBox->setCurrentIndex(char_encoding_idx);
+    sf_ui_->caseCheckBox->setChecked(recent.gui_search_case_sensitive);
+    sf_ui_->searchTypeComboBox->setCurrentIndex(search_type_idx);
+}
+
 void SearchFrame::updateWidgets()
 {
     if (cap_file_) {
@@ -219,13 +279,65 @@ void SearchFrame::updateWidgets()
     }
 }
 
-void SearchFrame::on_caseCheckBox_toggled(bool)
+void SearchFrame::on_searchInComboBox_currentIndexChanged(int idx)
 {
+    switch (idx) {
+    case in_packet_list_:
+        recent.gui_search_in = SEARCH_IN_PACKET_LIST;
+        break;
+    case in_proto_tree_:
+        recent.gui_search_in = SEARCH_IN_PACKET_DETAILS;
+        break;
+    case in_bytes_:
+        recent.gui_search_in = SEARCH_IN_PACKET_BYTES;
+        break;
+    default:
+        break;
+    }
+}
+
+void SearchFrame::on_charEncodingComboBox_currentIndexChanged(int idx)
+{
+    switch (idx) {
+    case narrow_and_wide_chars_:
+        recent.gui_search_char_set = SEARCH_CHAR_SET_NARROW_AND_WIDE;
+        break;
+    case narrow_chars_:
+        recent.gui_search_char_set = SEARCH_CHAR_SET_NARROW;
+        break;
+    case wide_chars_:
+        recent.gui_search_char_set = SEARCH_CHAR_SET_WIDE;
+        break;
+    default:
+        break;
+    }
+}
+
+void SearchFrame::on_caseCheckBox_toggled(bool checked)
+{
+    recent.gui_search_case_sensitive = checked;
     regexCompile();
 }
 
-void SearchFrame::on_searchTypeComboBox_currentIndexChanged(int)
+void SearchFrame::on_searchTypeComboBox_currentIndexChanged(int idx)
 {
+    switch (idx) {
+    case df_search_:
+        recent.gui_search_type = SEARCH_TYPE_DISPLAY_FILTER;
+        break;
+    case hex_search_:
+        recent.gui_search_type = SEARCH_TYPE_HEX_VALUE;
+        break;
+    case string_search_:
+        recent.gui_search_type = SEARCH_TYPE_STRING;
+        break;
+    case regex_search_:
+        recent.gui_search_type = SEARCH_TYPE_REGEX;
+        break;
+    default:
+        break;
+    }
+
     updateWidgets();
 }
 
@@ -261,13 +373,13 @@ void SearchFrame::on_findButton_clicked()
     case df_search_:
         if (!dfilter_compile(sf_ui_->searchLineEdit->text().toUtf8().constData(), &dfp, NULL)) {
             err_string = tr("Invalid filter.");
-            emit pushFilterSyntaxStatus(err_string);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
             return;
         }
 
         if (dfp == NULL) {
             err_string = tr("That filter doesn't test anything.");
-            emit pushFilterSyntaxStatus(err_string);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
             return;
         }
         break;
@@ -275,7 +387,7 @@ void SearchFrame::on_findButton_clicked()
         bytes = convert_string_to_hex(sf_ui_->searchLineEdit->text().toUtf8().constData(), &nbytes);
         if (bytes == NULL) {
             err_string = tr("That's not a valid hex string.");
-            emit pushFilterSyntaxStatus(err_string);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
             return;
         }
         cap_file_->hex = TRUE;
@@ -284,7 +396,7 @@ void SearchFrame::on_findButton_clicked()
     case regex_search_:
         if (sf_ui_->searchLineEdit->text().isEmpty()) {
             err_string = tr("You didn't specify any text for which to search.");
-            emit pushFilterSyntaxStatus(err_string);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
             return;
         }
         cap_file_->string = TRUE;
@@ -302,14 +414,14 @@ void SearchFrame::on_findButton_clicked()
             break;
         default:
             err_string = tr("No valid character set selected. Please report this to the development team.");
-            emit pushFilterSyntaxStatus(err_string);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
             return;
         }
         string = convert_string_case(sf_ui_->searchLineEdit->text().toUtf8().constData(), cap_file_->case_type);
         break;
     default:
         err_string = tr("No valid search type selected. Please report this to the development team.");
-        emit pushFilterSyntaxStatus(err_string);
+        wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
         return;
     }
 
@@ -325,7 +437,7 @@ void SearchFrame::on_findButton_clicked()
         break;
     default:
         err_string = tr("No valid search area selected. Please report this to the development team.");
-        emit pushFilterSyntaxStatus(err_string);
+        wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
         return;
     }
 
@@ -339,12 +451,12 @@ void SearchFrame::on_findButton_clicked()
         if (!found_packet) {
             /* We didn't find a packet */
             err_string = tr("No packet contained those bytes.");
-            emit pushFilterSyntaxStatus(err_string);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
             return;
         }
     } else if (cap_file_->string) {
         if (search_type == regex_search_ && !cap_file_->regex) {
-            emit pushFilterSyntaxStatus(regex_error_);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, regex_error_);
             return;
         }
         if (cap_file_->summary_data) {
@@ -353,7 +465,7 @@ void SearchFrame::on_findButton_clicked()
             g_free(string);
             if (!found_packet) {
                 err_string = tr("No packet contained that string in its Info column.");
-                emit pushFilterSyntaxStatus(err_string);
+                wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
                 return;
             }
         } else if (cap_file_->decode_data) {
@@ -362,7 +474,7 @@ void SearchFrame::on_findButton_clicked()
             g_free(string);
             if (!found_packet) {
                 err_string = tr("No packet contained that string in its dissected display.");
-                emit pushFilterSyntaxStatus(err_string);
+                wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
                 return;
             }
         } else if (cap_file_->packet_data && string) {
@@ -371,7 +483,7 @@ void SearchFrame::on_findButton_clicked()
             g_free(string);
             if (!found_packet) {
                 err_string = tr("No packet contained that string in its converted data.");
-                emit pushFilterSyntaxStatus(err_string);
+                wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
                 return;
             }
         }
@@ -381,7 +493,7 @@ void SearchFrame::on_findButton_clicked()
         dfilter_free(dfp);
         if (!found_packet) {
             err_string = tr("No packet matched that filter.");
-            emit pushFilterSyntaxStatus(err_string);
+            wsApp->pushStatus(WiresharkApplication::FilterSyntax, err_string);
             g_free(bytes);
             return;
         }

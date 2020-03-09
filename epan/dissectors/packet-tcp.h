@@ -77,7 +77,8 @@ typedef struct tcpheader {
 	guint32 th_rawseq;  /* raw value */
 	guint32 th_seq;     /* raw or relative value depending on tcp_relative_seq */
 
-	guint32 th_ack;
+	guint32 th_rawack;  /* raw value */
+	guint32 th_ack;     /* raw or relative value depending on tcp_relative_seq */
 	gboolean th_have_seglen;	/* TRUE if th_seglen is valid */
 	guint32 th_seglen;  /* in bytes */
 	guint32 th_win;   /* make it 32 bits so we can handle some scaling */
@@ -276,7 +277,8 @@ struct mptcp_subflow {
 
 typedef enum {
 	MPTCP_HMAC_NOT_SET = 0,
-	MPTCP_HMAC_SHA1 = 1,
+	/* this is either SHA1 for MPTCP v0 or sha256 for MPTCP v1 */
+	MPTCP_HMAC_SHA = 1,
 	MPTCP_HMAC_LAST
 } mptcp_hmac_algorithm_t;
 
@@ -508,8 +510,8 @@ WS_DLL_PUBLIC guint32 get_tcp_stream_count(void);
 WS_DLL_PUBLIC guint32 get_mptcp_stream_count(void);
 
 /* Follow Stream functionality shared with HTTP (and SSL?) */
-extern gchar *tcp_follow_conv_filter(packet_info *pinfo, guint *stream);
-extern gchar *tcp_follow_index_filter(guint stream);
+extern gchar *tcp_follow_conv_filter(packet_info *pinfo, guint *stream, guint *sub_stream);
+extern gchar *tcp_follow_index_filter(guint stream, guint sub_stream);
 extern gchar *tcp_follow_address_filter(address *src_addr, address *dst_addr, int src_port, int dst_port);
 
 #ifdef __cplusplus

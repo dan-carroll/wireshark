@@ -2,6 +2,8 @@
  * Decompression code for LZ77+Huffman. This encoding is used by
  * Microsoft in various file formats and protocols including SMB3.
  *
+ * See MS-XCA.
+ *
  * Initial code from Samba re-licensed with Samuel's permission.
  * Copyright (C) Samuel Cabrero 2017
  *
@@ -168,7 +170,7 @@ static int PrefixCodeTreeRebuild( struct hf_tree *tree,
 	}
 
 	if (input->size < ENCODED_TREE_SIZE)
-		return FALSE;
+		return -1;
 
 	for (i = 0; i < ENCODED_TREE_SIZE; i++) {
 		symbolInfo[2*i].symbol = 2*i;

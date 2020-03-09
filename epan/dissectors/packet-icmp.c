@@ -1398,8 +1398,8 @@ dissect_icmp(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, void* data)
 	/* To do: check for runts, errs, etc. */
 	icmp_type = tvb_get_guint8(tvb, 0);
 	icmp_code = tvb_get_guint8(tvb, 1);
-	/*length of original datagram carried in the ICMP payload. In terms of 32 bit
-	 * words.*/
+	/* RFC 4884: Length of original datagram carried in the ICMP payload,
+	 * or 0 otherwise. Length in terms of 32 bit words.*/
 	icmp_original_dgram_length = tvb_get_guint8(tvb, 5);
 
 	type_str =
@@ -1521,9 +1521,6 @@ dissect_icmp(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, void* data)
 		break;
 
 	case ICMP_UNREACH:
-		/* If icmp_original_dgram_length > 0, then this packet is compliant with RFC 4884 and
-		 * interpret the 6th octet as length of the original datagram
-		 */
 		if (icmp_original_dgram_length > 0) {
 			proto_tree_add_item(icmp_tree, hf_icmp_unused, tvb, 4, 1, ENC_NA);
 			proto_tree_add_item(icmp_tree, hf_icmp_length, tvb, 5, 1, ENC_BIG_ENDIAN);
@@ -1553,14 +1550,13 @@ dissect_icmp(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, void* data)
 	case ICMP_PARAMPROB:
 		proto_tree_add_item(icmp_tree, hf_icmp_pointer, tvb, 4, 1, ENC_BIG_ENDIAN);
 		if (icmp_original_dgram_length > 0) {
-			proto_tree_add_item(icmp_tree, hf_icmp_unused, tvb, 4, 1, ENC_NA);
 			proto_tree_add_item(icmp_tree, hf_icmp_length, tvb, 5, 1, ENC_BIG_ENDIAN);
 			ti = proto_tree_add_uint(icmp_tree, hf_icmp_length_original_datagram,
 						 tvb, 5, 1, icmp_original_dgram_length * 4);
 			proto_item_set_generated(ti);
 			proto_tree_add_item(icmp_tree, hf_icmp_unused, tvb, 6, 2, ENC_NA);
 		} else {
-			proto_tree_add_item(icmp_tree, hf_icmp_unused, tvb, 4, 4, ENC_NA);
+			proto_tree_add_item(icmp_tree, hf_icmp_unused, tvb, 5, 3, ENC_NA);
 		}
 		break;
 
@@ -1673,6 +1669,9 @@ dissect_icmp(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, void* data)
 			if (!pinfo->flags.in_error_pkt) {
 				conv_key[0] =
 				    (guint32) tvb_get_ntohs(tvb, 2);
+				if (conv_key[0] == 0xffff) {
+					conv_key[0] = 0;
+				}
 				if (pinfo->flags.in_gre_pkt && prefs.strict_conversation_tracking_heuristics)
 					conv_key[0] |= 0x00010000;	/* set a bit for "in GRE" */
 				conv_key[1] =
@@ -1692,9 +1691,6 @@ dissect_icmp(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, void* data)
 				conv_key[0] =
 				    ip_checksum((guint8 *) & tmp,
 						sizeof(tmp));
-				if (conv_key[0] == 0) {
-					conv_key[0] = 0xffff;
-				}
 				if (pinfo->flags.in_gre_pkt && prefs.strict_conversation_tracking_heuristics) {
 					conv_key[0] |= 0x00010000;	/* set a bit for "in GRE" */
 				}

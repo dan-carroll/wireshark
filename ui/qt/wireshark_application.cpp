@@ -69,6 +69,9 @@
 
 #include <ui/qt/capture_file.h>
 
+#include <ui/qt/main_window.h>
+#include <ui_main_window.h>
+
 #include <QAction>
 #include <QApplication>
 #include <QColorDialog>
@@ -89,6 +92,10 @@
 
 #include <QFontDatabase>
 #include <QMimeDatabase>
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+#include <QStyleHints>
+#endif
 
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -220,7 +227,7 @@ extern "C" void menu_recent_file_write_all(FILE *rf) {
     }
 }
 
-#ifdef HAVE_SOFTWARE_UPDATE
+#if defined(HAVE_SOFTWARE_UPDATE) && defined(Q_OS_WIN)
 /** Check to see if Wireshark can shut down safely (e.g. offer to save the
  *  current capture).
  */
@@ -233,7 +240,7 @@ extern "C" int software_update_can_shutdown_callback(void) {
 extern "C" void software_update_shutdown_request_callback(void) {
     wsApp->softwareUpdateShutdownRequest();
 }
-#endif // HAVE_SOFTWARE_UPDATE
+#endif // HAVE_SOFTWARE_UPDATE && Q_OS_WIN
 
 // Check each recent item in a separate thread so that we don't hang while
 // calling stat(). This is called periodically because files and entire
@@ -280,7 +287,7 @@ void WiresharkApplication::helpTopicAction(topic_action_e action)
 {
     QString url = gchar_free_to_qstring(topic_action_url(action));
 
-    if(!url.isEmpty()) {
+    if (!url.isEmpty()) {
         QDesktopServices::openUrl(QUrl(url));
     }
 }
@@ -356,7 +363,7 @@ int WiresharkApplication::monospaceTextSize(const char *str)
 #endif
 }
 
-void WiresharkApplication::setConfigurationProfile(const gchar *profile_name, bool write_recent)
+void WiresharkApplication::setConfigurationProfile(const gchar *profile_name, bool write_recent_file)
 {
     char  *rf_path;
     int    rf_open_errno;
@@ -399,7 +406,7 @@ void WiresharkApplication::setConfigurationProfile(const gchar *profile_name, bo
     /* Get the current geometry, before writing it to disk */
     emit profileChanging();
 
-    if (write_recent && profile_exists(get_profile_name(), FALSE))
+    if (write_recent_file && profile_exists(get_profile_name(), FALSE))
     {
         /* Write recent file for profile we are leaving, if it still exists */
         write_profile_recent();
@@ -451,6 +458,9 @@ void WiresharkApplication::setConfigurationProfile(const gchar *profile_name, bo
 
     emit localInterfaceListChanged();
     emit packetDissectionChanged();
+
+    /* Write recent_common file to ensure last used profile setting is stored. */
+    write_recent();
 }
 
 void WiresharkApplication::reloadLuaPluginsDelayed()
@@ -520,125 +530,6 @@ void WiresharkApplication::storeCustomColorsInRecent()
         }
     }
 }
-
-#ifdef _WIN32
-// Dell Backup and Recovery is awful and terrible.
-// https://bugs.wireshark.org/bugzilla/show_bug.cgi?id=12036
-// https://bugreports.qt.io/browse/QTBUG-41416
-// https://www.dell.com/community/Productivity-Software/Backup-and-Recovery-causing-applications-using-Qt5-DLLs-to-crash/m-p/4590325
-// https://stackoverflow.com/questions/30833889/dll-hell-with-sqlite/33697140#33697140
-//
-// According to https://www.portraitprofessional.com/support/?qid=79 , which
-// points to https://cloudfrontsecure.anthropics.com/Tools/unregister_dell_backup.cmd
-// DBAR's shell extension DLLs are named DBROverlayIconBackuped.dll,
-// DBROverlayIconNotBackuped.dll, and DBRShellExtension.dll.
-//
-// Look for them in the registry and show a warning if we find any of them.
-//
-// This is obnoxious, but so is crashing. Hopefully we can remove it at some
-// point.
-
-// Returns only the most significant (major + minor) 32 bits of the version number.
-unsigned int WiresharkApplication::fileVersion(QString file_path) {
-    unsigned int version = 0;
-    DWORD gfvi_size = GetFileVersionInfoSize((LPCWSTR) file_path.utf16(), NULL);
-
-    if (gfvi_size == 0) {
-        return 0;
-    }
-
-    LPSTR version_info = new char[gfvi_size];
-    if (GetFileVersionInfo((LPCWSTR) file_path.utf16(), 0, gfvi_size, version_info)) {
-        void *vqv_buffer = NULL;
-        UINT vqv_size = 0;
-        if (VerQueryValue(version_info, TEXT("\\"), &vqv_buffer, &vqv_size)) {
-            VS_FIXEDFILEINFO *vqv_fileinfo = (VS_FIXEDFILEINFO *)vqv_buffer;
-            if (vqv_size && vqv_buffer && vqv_fileinfo->dwSignature == 0xfeef04bd) {
-                version = vqv_fileinfo->dwFileVersionMS;
-            }
-        }
-    }
-
-    delete[] version_info;
-    return version;
-}
-
-void WiresharkApplication::checkForDbar()
-{
-    QStringList dbar_dlls = QStringList()
-        // << "7-Zip.dll" // For testing. I don't have DBAR.
-        // << "shell32.dll"
-        << "DBROverlayIconBackuped.dll"
-        << "DBROverlayIconNotBackuped.dll"
-        << "DBRShellExtension.dll";
-    // List of HKCR subkeys in which to look for "shellex\ContextMenuHandlers".
-    // This may be incomplete.
-    // https://docs.microsoft.com/en-us/windows/win32/shell/reg-shell-exts
-    QStringList hkcr_subkeys = QStringList()
-        << "*"
-        << "AllFileSystemObjects"
-        << "Folder"
-        << "Directory"
-        << "Drive";
-    QRegExp uuid_re("^\\{.+\\}");
-    QSet<QString> clsids;
-
-    // Look for context menu handler CLSIDs. We might want to skip this and
-    // just iterate through all of the CLSID subkeys below.
-    foreach (QString subkey, hkcr_subkeys) {
-        QString cmh_path = QString("HKEY_CLASSES_ROOT\\%1\\shellex\\ContextMenuHandlers").arg(subkey);
-        QSettings cmh_reg(cmh_path, QSettings::NativeFormat);
-        foreach (QString cmh_key, cmh_reg.allKeys()) {
-            // Add anything that looks like a UUID.
-            if (!cmh_key.endsWith("/.")) continue; // No default key?
-
-            // "Registering Shell Extension Handlers" says the subkey name
-            // should be the class ID...
-            if (cmh_key.contains(uuid_re)) {
-                cmh_key.chop(2);
-                clsids += cmh_key;
-                continue;
-            }
-
-            // ...it then gives an example with the subkey named after the
-            // application, with the default key containing the class ID.
-            QString cmh_default = cmh_reg.value(cmh_key).toString();
-            if (cmh_default.contains(uuid_re)) clsids += cmh_default;
-
-        }
-    }
-
-    // We have a list of context menu handler CLSIDs. Now look for
-    // offending DLLs.
-    foreach (QString clsid, clsids.toList()) {
-        QString inproc_path = QString("HKEY_CLASSES_ROOT\\CLSID\\%1\\InprocServer32").arg(clsid);
-        QSettings inproc_reg(inproc_path, QSettings::NativeFormat);
-        QString inproc_default = inproc_reg.value(".").toString();
-        if (inproc_default.isEmpty()) continue;
-
-        foreach (QString dbar_dll, dbar_dlls) {
-            if (! inproc_default.contains(dbar_dll, Qt::CaseInsensitive)) continue;
-            // XXX We don't expand environment variables in the path.
-            unsigned int dll_version = fileVersion(inproc_default);
-            unsigned int bad_version = 1 << 16 | 8; // Offending DBAR version is 1.8.
-            if (dll_version == bad_version) {
-                QMessageBox dbar_msgbox;
-                dbar_msgbox.setIcon(QMessageBox::Warning);
-                dbar_msgbox.setStandardButtons(QMessageBox::Ok);
-                dbar_msgbox.setWindowTitle(tr("Dell Backup and Recovery Found"));
-                dbar_msgbox.setText(tr("You appear to be running Dell Backup and Recovery 1.8."));
-                dbar_msgbox.setInformativeText(tr(
-                    "DBAR can make many applications crash"
-                    " <a href=\"https://bugs.wireshark.org/bugzilla/show_bug.cgi?id=12036\">including Wireshark</a>."
-                ));
-                dbar_msgbox.setDetailedText(tr("Offending DLL: %1").arg(inproc_default));
-                dbar_msgbox.exec();
-                return;
-            }
-        }
-    }
-}
-#endif
 
 void WiresharkApplication::setLastOpenDir(const char *dir_name)
 {
@@ -742,6 +633,15 @@ WiresharkApplication::WiresharkApplication(int &argc,  char **argv) :
 #endif // Q_OS_WIN
 
     setAttribute(Qt::AA_UseHighDpiPixmaps);
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0) && QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    setAttribute(Qt::AA_DisableWindowContextHelpButton);
+#endif
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+    styleHints()->setShowShortcutsInContextMenus(true);
+#endif
+
     //
     // XXX - this means we try to check for the existence of all files
     // in the recent list every 2 seconds; that causes noticeable network
@@ -858,12 +758,8 @@ WiresharkApplication::WiresharkApplication(int &argc,  char **argv) :
     QPalette gui_pal = qApp->palette();
     prefs_set_gui_theme_is_dark(gui_pal.windowText().color().value() > gui_pal.window().color().value());
 
-#ifdef HAVE_SOFTWARE_UPDATE
+#if defined(HAVE_SOFTWARE_UPDATE) && defined(Q_OS_WIN)
     connect(this, SIGNAL(softwareUpdateQuit()), this, SLOT(quit()), Qt::QueuedConnection);
-#endif
-
-#ifdef _WIN32
-    checkForDbar();
 #endif
 
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(cleanup()));
@@ -1179,12 +1075,6 @@ _e_prefs *WiresharkApplication::readConfigurationFiles(bool reset)
     }
 #endif
 
-    /* Read the capture filter file. */
-    read_filter_list(CFILTER_LIST);
-
-    /* Read the display filter file. */
-    read_filter_list(DFILTER_LIST);
-
     return prefs_p;
 }
 
@@ -1304,7 +1194,7 @@ void WiresharkApplication::zoomTextFont(int zoomLevel)
     emit zoomMonospaceFont(zoomed_font_);
 }
 
-#ifdef HAVE_SOFTWARE_UPDATE
+#if defined(HAVE_SOFTWARE_UPDATE) && defined(Q_OS_WIN)
 bool WiresharkApplication::softwareUpdateCanShutdown() {
     software_update_ok_ = true;
     // At this point the update is ready to install, but WinSparkle has
@@ -1340,7 +1230,7 @@ void WiresharkApplication::captureEventHandler(CaptureEvent ev)
 #ifdef HAVE_LIBPCAP
     case CaptureEvent::Update:
     case CaptureEvent::Fixed:
-        switch ( ev.eventType() )
+        switch (ev.eventType())
         {
         case CaptureEvent::Started:
             active_captures_++;
@@ -1358,7 +1248,7 @@ void WiresharkApplication::captureEventHandler(CaptureEvent ev)
     case CaptureEvent::File:
     case CaptureEvent::Reload:
     case CaptureEvent::Rescan:
-        switch ( ev.eventType() )
+        switch (ev.eventType())
         {
         case CaptureEvent::Started:
             QTimer::singleShot(TAP_UPDATE_DEFAULT_INTERVAL / 5, this, SLOT(updateTaps()));
@@ -1376,7 +1266,84 @@ void WiresharkApplication::captureEventHandler(CaptureEvent ev)
     }
 }
 
-/*
+void WiresharkApplication::pushStatus(StatusInfo status, const QString &message, const QString &messagetip)
+{
+    if (! mainWindow() || ! qobject_cast<MainWindow *>(mainWindow()))
+        return;
+
+    MainWindow * mw = qobject_cast<MainWindow *>(mainWindow());
+    if (! mw->main_ui_ || ! mw->main_ui_->statusBar)
+        return;
+
+    MainStatusBar * bar = mw->main_ui_->statusBar;
+
+    switch(status)
+    {
+        case FilterSyntax:
+            bar->pushGenericStatus(MainStatusBar::STATUS_CTX_FILTER, message);
+            break;
+        case FieldStatus:
+            bar->pushGenericStatus(MainStatusBar::STATUS_CTX_FIELD, message);
+            break;
+        case FileStatus:
+            bar->pushGenericStatus(MainStatusBar::STATUS_CTX_FILE, message, messagetip);
+            break;
+        case ByteStatus:
+            bar->pushGenericStatus(MainStatusBar::STATUS_CTX_BYTE, message);
+            break;
+        case BusyStatus:
+            bar->pushGenericStatus(MainStatusBar::STATUS_CTX_PROGRESS, message, messagetip);
+            break;
+        case TemporaryStatus:
+            bar->pushGenericStatus(MainStatusBar::STATUS_CTX_TEMPORARY, message);
+            break;
+    }
+}
+
+void WiresharkApplication::popStatus(StatusInfo status)
+{
+    if (! mainWindow() || ! qobject_cast<MainWindow *>(mainWindow()))
+        return;
+
+    MainWindow * mw = qobject_cast<MainWindow *>(mainWindow());
+    if (! mw->main_ui_ || ! mw->main_ui_->statusBar)
+        return;
+
+    MainStatusBar * bar = mw->main_ui_->statusBar;
+
+    switch(status)
+    {
+        case FilterSyntax:
+            bar->popGenericStatus(MainStatusBar::STATUS_CTX_FILTER);
+            break;
+        case FieldStatus:
+            bar->popGenericStatus(MainStatusBar::STATUS_CTX_FIELD);
+            break;
+        case FileStatus:
+            bar->popGenericStatus(MainStatusBar::STATUS_CTX_FILE);
+            break;
+        case ByteStatus:
+            bar->popGenericStatus(MainStatusBar::STATUS_CTX_BYTE);
+            break;
+        case BusyStatus:
+            bar->popGenericStatus(MainStatusBar::STATUS_CTX_PROGRESS);
+            break;
+        case TemporaryStatus:
+            bar->popGenericStatus(MainStatusBar::STATUS_CTX_TEMPORARY);
+            break;
+    }
+}
+
+void WiresharkApplication::gotoFrame(int frame)
+{
+    if (! mainWindow() || ! qobject_cast<MainWindow *>(mainWindow()))
+        return;
+
+    MainWindow * mw = qobject_cast<MainWindow *>(mainWindow());
+    mw->gotoFrame(frame);
+}
+
+ /*
  * Editor modelines
  *
  * Local Variables:

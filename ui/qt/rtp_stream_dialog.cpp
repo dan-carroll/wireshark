@@ -74,15 +74,10 @@ class RtpStreamTreeWidgetItem : public QTreeWidgetItem
 {
 public:
     RtpStreamTreeWidgetItem(QTreeWidget *tree, rtpstream_info_t *stream_info) :
-        QTreeWidgetItem(tree, rtp_stream_type_)
+        QTreeWidgetItem(tree, rtp_stream_type_),
+        stream_info_(stream_info)
     {
-        stream_info_=rtpstream_info_malloc_and_copy_deep(stream_info);
         drawData();
-    }
-
-    ~RtpStreamTreeWidgetItem()
-    {
-        rtpstream_info_free_all(stream_info_);
     }
 
     rtpstream_info_t *streamInfo() const { return stream_info_; }
@@ -219,6 +214,8 @@ RtpStreamDialog::RtpStreamDialog(QWidget &parent, CaptureFile &cf) :
     ctx_menu_.addAction(ui->actionCopyAsCsv);
     ctx_menu_.addAction(ui->actionCopyAsYaml);
     ctx_menu_.addAction(ui->actionAnalyze);
+    set_action_shortcuts_visible_in_context_menu(ctx_menu_.actions());
+
     ui->streamTreeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     ui->streamTreeWidget->header()->setSortIndicator(0, Qt::AscendingOrder);
     connect(ui->streamTreeWidget, SIGNAL(customContextMenuRequested(QPoint)),
@@ -329,13 +326,13 @@ void RtpStreamDialog::tapMarkPacket(rtpstream_tapinfo_t *tapinfo, frame_data *fd
 
 void RtpStreamDialog::updateStreams()
 {
-    GList *cur_stream = g_list_nth(tapinfo_.strinfo_list, ui->streamTreeWidget->topLevelItemCount());
+    GList *cur_stream = g_list_nth(tapinfo_.strinfo_list, static_cast<guint>(ui->streamTreeWidget->topLevelItemCount()));
 
     // Add any missing items
     while (cur_stream && cur_stream->data) {
-        rtpstream_info_t *stream_info = (rtpstream_info_t*) cur_stream->data;
+        rtpstream_info_t *stream_info = gxx_list_data(rtpstream_info_t*, cur_stream);
         new RtpStreamTreeWidgetItem(ui->streamTreeWidget, stream_info);
-        cur_stream = g_list_next(cur_stream);
+        cur_stream = gxx_list_next(cur_stream);
     }
 
     // Recalculate values

@@ -48,6 +48,7 @@
 #define RECENT_GUI_GEOMETRY_MAIN_WIDTH        "gui.geometry_main_width"
 #define RECENT_GUI_GEOMETRY_MAIN_HEIGHT       "gui.geometry_main_height"
 #define RECENT_GUI_GEOMETRY_MAIN_MAXIMIZED    "gui.geometry_main_maximized"
+#define RECENT_GUI_GEOMETRY_LEFTALIGN_ACTIONS "gui.geometry_leftalign_actions"
 #define RECENT_GUI_GEOMETRY_MAIN_UPPER_PANE   "gui.geometry_main_upper_pane"
 #define RECENT_GUI_GEOMETRY_MAIN_LOWER_PANE   "gui.geometry_main_lower_pane"
 #define RECENT_GUI_GEOMETRY_STATUS_PANE_LEFT  "gui.geometry_status_pane"
@@ -61,11 +62,15 @@
 #define RECENT_GUI_CUSTOM_COLORS              "gui.custom_colors"
 #define RECENT_GUI_TOOLBAR_SHOW               "gui.additional_toolbar_show"
 #define RECENT_GUI_INTERFACE_TOOLBAR_SHOW     "gui.interface_toolbar_show"
+#define RECENT_GUI_SEARCH_IN                  "gui.search_in"
+#define RECENT_GUI_SEARCH_CHAR_SET            "gui.search_char_set"
+#define RECENT_GUI_SEARCH_CASE_SENSITIVE      "gui.search_case_sensitive"
+#define RECENT_GUI_SEARCH_TYPE                "gui.search_type"
 
 #define RECENT_GUI_GEOMETRY                   "gui.geom."
 
 #define RECENT_KEY_PRIVS_WARN_IF_ELEVATED     "privs.warn_if_elevated"
-#define RECENT_KEY_PRIVS_WARN_IF_NO_NPF       "privs.warn_if_no_npf"
+#define RECENT_KEY_SYS_WARN_IF_NO_CAPTURE     "sys.warn_if_no_capture"
 
 #define RECENT_FILE_NAME "recent"
 #define RECENT_COMMON_FILE_NAME "recent_common"
@@ -115,6 +120,28 @@ static const value_string bytes_encoding_type_values[] = {
     { BYTES_ENC_FROM_PACKET,    "FROM_PACKET"  },
     { BYTES_ENC_ASCII,          "ASCII"  },
     { BYTES_ENC_EBCDIC,         "EBCDIC"  },
+    { 0, NULL }
+};
+
+static const value_string search_in_values[] = {
+    { SEARCH_IN_PACKET_LIST,    "PACKET_LIST" },
+    { SEARCH_IN_PACKET_DETAILS, "PACKET_DETAILS" },
+    { SEARCH_IN_PACKET_BYTES,   "PACKET_BYTES" },
+    { 0, NULL }
+};
+
+static const value_string search_char_set_values[] = {
+    { SEARCH_CHAR_SET_NARROW_AND_WIDE, "NARROW_AND_WIDE" },
+    { SEARCH_CHAR_SET_NARROW,          "NARROW" },
+    { SEARCH_CHAR_SET_WIDE,            "WIDE" },
+    { 0, NULL }
+};
+
+static const value_string search_type_values[] = {
+    { SEARCH_TYPE_DISPLAY_FILTER, "DISPLAY_FILTER" },
+    { SEARCH_TYPE_HEX_VALUE,      "HEX_VALUE" },
+    { SEARCH_TYPE_STRING,         "STRING" },
+    { SEARCH_TYPE_REGEX,          "REGEX" },
     { 0, NULL }
 };
 
@@ -607,7 +634,7 @@ write_recent_enum(FILE *rf, const char *description, const char *name,
         fprintf(rf, "%s: %s\n", name, if_invalid != NULL ? if_invalid : "Unknown");
 }
 
-/* Attempt to write out "recent common" to the user's recent common file.
+/* Attempt to write out "recent common" to the user's recent_common file.
    If we got an error report it with a dialog box and return FALSE,
    otherwise return TRUE. */
 gboolean
@@ -644,9 +671,10 @@ write_recent(void)
     }
     g_free(rf_path);
 
-    fputs("# Recent settings file for Wireshark " VERSION ".\n"
+    fputs("# Common recent settings file for Wireshark " VERSION ".\n"
             "#\n"
-            "# This file is regenerated each time Wireshark is quit.\n"
+            "# This file is regenerated each time Wireshark is quit\n"
+            "# and when changing configuration profile.\n"
             "# So be careful, if you want to make manual changes here.\n"
             "\n"
             "######## Recent capture files (latest last), cannot be altered through command line ########\n"
@@ -687,6 +715,10 @@ write_recent(void)
             RECENT_GUI_GEOMETRY_MAIN_MAXIMIZED,
             recent.gui_geometry_main_maximized);
 
+    write_recent_boolean(rf, "Leftalign Action Buttons",
+            RECENT_GUI_GEOMETRY_LEFTALIGN_ACTIONS,
+            recent.gui_geometry_leftalign_actions);
+
     fprintf(rf, "\n# Statusbar left pane size.\n");
     fprintf(rf, "# Decimal number.\n");
     if (recent.gui_geometry_status_pane_left != 0) {
@@ -712,9 +744,19 @@ write_recent(void)
             RECENT_KEY_PRIVS_WARN_IF_ELEVATED,
             recent.privs_warn_if_elevated);
 
-    write_recent_boolean(rf, "Warn if npf.sys isn't loaded on Windows >= 6.0",
-            RECENT_KEY_PRIVS_WARN_IF_NO_NPF,
-            recent.privs_warn_if_no_npf);
+    write_recent_boolean(rf, "Warn if Wireshark is unable to capture",
+            RECENT_KEY_SYS_WARN_IF_NO_CAPTURE,
+            recent.sys_warn_if_no_capture);
+
+    write_recent_enum(rf, "Find packet search in", RECENT_GUI_SEARCH_IN, search_in_values,
+                      recent.gui_search_in);
+    write_recent_enum(rf, "Find packet character set", RECENT_GUI_SEARCH_CHAR_SET, search_char_set_values,
+                      recent.gui_search_char_set);
+    write_recent_boolean(rf, "Find packet case sensitive search",
+                         RECENT_GUI_SEARCH_CASE_SENSITIVE,
+                         recent.gui_search_case_sensitive);
+    write_recent_enum(rf, "Find packet search type", RECENT_GUI_SEARCH_TYPE, search_type_values,
+                      recent.gui_search_type);
 
     window_geom_recent_write_all(rf);
 
@@ -905,6 +947,8 @@ read_set_recent_common_pair_static(gchar *key, const gchar *value,
 
     if (strcmp(key, RECENT_GUI_GEOMETRY_MAIN_MAXIMIZED) == 0) {
         parse_recent_boolean(value, &recent.gui_geometry_main_maximized);
+    } else if (strcmp(key, RECENT_GUI_GEOMETRY_LEFTALIGN_ACTIONS) == 0) {
+        parse_recent_boolean(value, &recent.gui_geometry_leftalign_actions);
     } else if (strcmp(key, RECENT_GUI_GEOMETRY_MAIN_X) == 0) {
         num = strtol(value, &p, 0);
         if (p == value || *p != '\0')
@@ -967,8 +1011,16 @@ read_set_recent_common_pair_static(gchar *key, const gchar *value,
         }
     } else if (strcmp(key, RECENT_KEY_PRIVS_WARN_IF_ELEVATED) == 0) {
         parse_recent_boolean(value, &recent.privs_warn_if_elevated);
-    } else if (strcmp(key, RECENT_KEY_PRIVS_WARN_IF_NO_NPF) == 0) {
-        parse_recent_boolean(value, &recent.privs_warn_if_no_npf);
+    } else if (strcmp(key, RECENT_KEY_SYS_WARN_IF_NO_CAPTURE) == 0) {
+        parse_recent_boolean(value, &recent.sys_warn_if_no_capture);
+    } else if (strcmp(key, RECENT_GUI_SEARCH_IN) == 0) {
+        recent.gui_search_in = (search_in_type)str_to_val(value, search_in_values, SEARCH_IN_PACKET_LIST);
+    } else if (strcmp(key, RECENT_GUI_SEARCH_CHAR_SET) == 0) {
+        recent.gui_search_char_set = (search_char_set_type)str_to_val(value, search_char_set_values, SEARCH_CHAR_SET_NARROW_AND_WIDE);
+    } else if (strcmp(key, RECENT_GUI_SEARCH_CASE_SENSITIVE) == 0) {
+        parse_recent_boolean(value, &recent.gui_search_case_sensitive);
+    } else if (strcmp(key, RECENT_GUI_SEARCH_TYPE) == 0) {
+        recent.gui_search_type = (search_type_type)str_to_val(value, search_type_values, SEARCH_TYPE_DISPLAY_FILTER);
     } else if (strcmp(key, RECENT_GUI_CUSTOM_COLORS) == 0) {
         recent.custom_colors = prefs_get_string_list(value);
     }
@@ -1219,12 +1271,14 @@ recent_read_static(char **rf_path_return, int *rf_errno_return)
     recent.gui_geometry_main_height   = DEF_HEIGHT;
     recent.gui_geometry_main_maximized=     FALSE;
 
+    recent.gui_geometry_leftalign_actions = FALSE;
+
     recent.gui_geometry_status_pane_left  = (DEF_WIDTH/3);
     recent.gui_geometry_status_pane_right = (DEF_WIDTH/3);
     recent.gui_geometry_wlan_stats_pane   = 200;
 
     recent.privs_warn_if_elevated = TRUE;
-    recent.privs_warn_if_no_npf = TRUE;
+    recent.sys_warn_if_no_capture = TRUE;
 
     recent.col_width_list = NULL;
     recent.gui_fileopen_remembered_dir = NULL;
@@ -1402,7 +1456,9 @@ recent_get_column_width(gint col)
     while (col_l) {
         col_w = (col_width_data *) col_l->data;
         if (col_w->cfmt == cfmt) {
-            if (cfmt != COL_CUSTOM || strcmp (cfield, col_w->cfield) == 0) {
+            if (cfmt != COL_CUSTOM) {
+                return col_w->width;
+            } else if (cfield && strcmp (cfield, col_w->cfield) == 0) {
                 return col_w->width;
             }
         }
@@ -1466,7 +1522,9 @@ recent_get_column_xalign(gint col)
     while (col_l) {
         col_w = (col_width_data *) col_l->data;
         if (col_w->cfmt == cfmt) {
-            if (cfmt != COL_CUSTOM || strcmp (cfield, col_w->cfield) == 0) {
+            if (cfmt != COL_CUSTOM) {
+                return col_w->xalign;
+            } else if (cfield && strcmp (cfield, col_w->cfield) == 0) {
                 return col_w->xalign;
             }
         }

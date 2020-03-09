@@ -47,6 +47,7 @@
 
 #include <wsutil/ws_printf.h> /* ws_debug_printf */
 #include <wsutil/crash_info.h>
+#include <wsutil/epochs.h>
 
 /* Ptvcursor limits */
 #define SUBTREE_ONCE_ALLOCATION_NUMBER 8
@@ -333,7 +334,6 @@ struct _protocol {
 
 /* List of all protocols */
 static GList *protocols = NULL;
-static GList *pino_protocols = NULL;
 
 /* Deregistered fields */
 static GPtrArray *deregistered_fields = NULL;
@@ -363,7 +363,7 @@ static GHashTable* prefixes = NULL;
 	wmem_free(pool, il);
 
 #define PROTO_REGISTRAR_GET_NTH(hfindex, hfinfo)						\
-	if((guint)hfindex >= gpa_hfinfo.len && getenv("WIRESHARK_ABORT_ON_DISSECTOR_BUG"))	\
+	if((guint)hfindex >= gpa_hfinfo.len && wireshark_abort_on_dissector_bug)	\
 		g_error("Unregistered hf! index=%d", hfindex);					\
 	DISSECTOR_ASSERT_HINT((guint)hfindex < gpa_hfinfo.len, "Unregistered hf!");	\
 	DISSECTOR_ASSERT_HINT(gpa_hfinfo.hfi[hfindex] != NULL, "Unregistered hf!");	\
@@ -559,22 +559,17 @@ proto_cleanup_base(void)
 		DISSECTOR_ASSERT(protocol->proto_id == hfinfo->id);
 
 		g_slice_free(header_field_info, hfinfo);
-		if (protocol->fields) {
-			g_ptr_array_free(protocol->fields, TRUE);
+		if (protocol->parent_proto_id != -1) {
+			// pino protocol
+			DISSECTOR_ASSERT(protocol->fields == NULL); //helpers should not have any registered fields
+			DISSECTOR_ASSERT(protocol->heur_list == NULL); //helpers should not have a heuristic list
+		} else {
+			if (protocol->fields) {
+				g_ptr_array_free(protocol->fields, TRUE);
+			}
+			g_list_free(protocol->heur_list);
 		}
-		g_list_free(protocol->heur_list);
 		protocols = g_list_remove(protocols, protocol);
-		g_free(protocol);
-	}
-
-	while (pino_protocols) {
-		protocol = (protocol_t *)pino_protocols->data;
-		PROTO_REGISTRAR_GET_NTH(protocol->proto_id, hfinfo);
-		DISSECTOR_ASSERT(protocol->proto_id == hfinfo->id);
-		DISSECTOR_ASSERT(protocol->fields == NULL); //helpers should not have any registered fields
-		g_slice_free(header_field_info, hfinfo);
-		DISSECTOR_ASSERT(protocol->heur_list == NULL); //helpers should not have a heuristic list
-		pino_protocols = g_list_remove(pino_protocols, protocol);
 		g_free(protocol);
 	}
 
@@ -1454,7 +1449,7 @@ void proto_report_dissector_bug(const char *format, ...)
 {
 	va_list args;
 
-	if (getenv("WIRESHARK_ABORT_ON_DISSECTOR_BUG") != NULL) {
+	if (wireshark_abort_on_dissector_bug) {
 		/*
 		 * Try to have the error message show up in the crash
 		 * information.
@@ -1781,11 +1776,22 @@ get_stringzpad_value(wmem_allocator_t *scope, tvbuff_t *tvb, gint start,
 }
 
 /*
- * Epochs for various non-UN*X time stamp formats.
+ * Deltas between the epochs for various non-UN*X time stamp formats and
+ * the January 1, 1970, 00:00:00 (proleptic?) UTC epoch for the UN*X time
+ * stamp format.
  */
-#define NTP_TIMEDIFF1900TO1970SEC G_GINT64_CONSTANT(2208988800)	/* NTP Time Diff 1900 to 1970 in sec */
-#define NTP_TIMEDIFF1970TO2036SEC G_GINT64_CONSTANT(2085978496)	/* NTP Time Diff 1970 to 2036 in sec */
-#define TOD_BASETIME G_GUINT64_CONSTANT(2208988800)	/* System/3x0 and z/Architecture TOD clock */
+
+/*
+ * NTP Era 0: the epoch is January 1, 1900, 00:00:00 (proleptic?) UTC.
+ * XXX - if it's OK if this is unsigned, can we just use
+ * EPOCH_DELTA_1900_01_01_00_00_00_UTC?
+ */
+#define NTP_TIMEDIFF1900TO1970SEC G_GINT64_CONSTANT(2208988800)
+
+/*
+ * NTP Era 1: the epoch is January 1, 2036, 00:00:00 UTC.
+ */
+#define NTP_TIMEDIFF1970TO2036SEC G_GINT64_CONSTANT(2085978496)
 
 /* this can be called when there is no tree, so tree may be null */
 static void
@@ -1794,7 +1800,8 @@ get_time_value(proto_tree *tree, tvbuff_t *tvb, const gint start,
 	       const gboolean is_relative)
 {
 	guint32     tmpsecs;
-	guint64     todsecs;
+	guint64     tmp64secs;
+	guint64     todusecs;
 
 	switch (encoding) {
 
@@ -1911,10 +1918,18 @@ get_time_value(proto_tree *tree, tvbuff_t *tvb, const gint start,
 				 * Convert 1/2^32s of a second to nanoseconds.
 				 */
 				time_stamp->nsecs = (int)(1000000000*(tvb_get_ntohl(tvb, start+4)/4294967296.0));
+				if ((time_stamp->nsecs == 0) && (tmpsecs == 0)) {
+					//This is "NULL" time
+					time_stamp->secs = 0;
+				}
 			} else if (length == 4) {
 				/*
 				 * Backwards compatibility.
 				 */
+				if (tmpsecs == 0) {
+					//This is "NULL" time
+					time_stamp->secs = 0;
+				}
 				time_stamp->nsecs = 0;
 			} else {
 				time_stamp->secs  = 0;
@@ -1950,10 +1965,18 @@ get_time_value(proto_tree *tree, tvbuff_t *tvb, const gint start,
 				 * Convert 1/2^32s of a second to nanoseconds.
 				 */
 				time_stamp->nsecs = (int)(1000000000*(tvb_get_letohl(tvb, start+4)/4294967296.0));
+				if ((time_stamp->nsecs == 0) && (tmpsecs == 0)) {
+					//This is "NULL" time
+					time_stamp->secs = 0;
+				}
 			} else if (length == 4) {
 				/*
 				 * Backwards compatibility.
 				 */
+				if (tmpsecs == 0) {
+					//This is "NULL" time
+					time_stamp->secs = 0;
+				}
 				time_stamp->nsecs = 0;
 			} else {
 				time_stamp->secs  = 0;
@@ -1965,16 +1988,18 @@ get_time_value(proto_tree *tree, tvbuff_t *tvb, const gint start,
 		case ENC_TIME_TOD|ENC_BIG_ENDIAN:
 			/*
 			 * S/3x0 and z/Architecture TOD clock time stamp,
-			 * big-endian.
+			 * big-endian.  The epoch is January 1, 1900,
+			 * 00:00:00 (proleptic?) UTC.
+			 *
 			 * Only supported for absolute times.
 			 */
 			DISSECTOR_ASSERT(!is_relative);
 			DISSECTOR_ASSERT(length == 8);
 
 			if (length == 8) {
-				todsecs  = tvb_get_ntoh64(tvb, start) >> 12;
-				time_stamp->secs = (time_t)((todsecs  / 1000000) - TOD_BASETIME);
-				time_stamp->nsecs = (int)((todsecs  % 1000000) * 1000);
+				todusecs  = tvb_get_ntoh64(tvb, start) >> 12;
+				time_stamp->secs = (time_t)((todusecs  / 1000000) - EPOCH_DELTA_1900_01_01_00_00_00_UTC);
+				time_stamp->nsecs = (int)((todusecs  % 1000000) * 1000);
 			} else {
 				time_stamp->secs  = 0;
 				time_stamp->nsecs = 0;
@@ -1985,15 +2010,17 @@ get_time_value(proto_tree *tree, tvbuff_t *tvb, const gint start,
 		case ENC_TIME_TOD|ENC_LITTLE_ENDIAN:
 			/*
 			 * S/3x0 and z/Architecture TOD clock time stamp,
-			 * little-endian.
+			 * little-endian.  The epoch is January 1, 1900,
+			 * 00:00:00 (proleptic?) UTC.
+			 *
 			 * Only supported for absolute times.
 			 */
 			DISSECTOR_ASSERT(!is_relative);
 
 			if (length == 8) {
-				todsecs  = tvb_get_letoh64(tvb, start) >> 12 ;
-				time_stamp->secs = (time_t)((todsecs  / 1000000) - TOD_BASETIME);
-				time_stamp->nsecs = (int)((todsecs  % 1000000) * 1000);
+				todusecs  = tvb_get_letoh64(tvb, start) >> 12 ;
+				time_stamp->secs = (time_t)((todusecs  / 1000000) - EPOCH_DELTA_1900_01_01_00_00_00_UTC);
+				time_stamp->nsecs = (int)((todusecs  % 1000000) * 1000);
 			} else {
 				time_stamp->secs  = 0;
 				time_stamp->nsecs = 0;
@@ -2046,6 +2073,43 @@ get_time_value(proto_tree *tree, tvbuff_t *tvb, const gint start,
 				time_stamp->secs  = 0;
 				time_stamp->nsecs = 0;
 				report_type_length_mismatch(tree, "an RTPS time stamp", length, (length < 4));
+			}
+			break;
+
+		case ENC_TIME_MIP6 | ENC_BIG_ENDIAN:
+			/*
+			* MIP6 time stamp, big-endian.
+			* A 64-bit unsigned integer field containing a timestamp.  The
+			* value indicates the number of seconds since January 1, 1970,
+			* 00:00 UTC, by using a fixed point format.  In this format, the
+			* integer number of seconds is contained in the first 48 bits of
+			* the field, and the remaining 16 bits indicate the number of
+			* 1/65536 fractions of a second.
+
+			* Only supported for absolute times.
+			*/
+			DISSECTOR_ASSERT(!is_relative);
+
+			if (length == 8) {
+				/* We need a temporary variable here so the casting and fractions
+				* of a second work correctly.
+				*/
+				tmp64secs = tvb_get_ntoh48(tvb, start);
+				tmpsecs = tvb_get_ntohs(tvb, start + 6);
+				tmpsecs <<= 16;
+
+				if ((tmp64secs == 0) && (tmpsecs == 0)) {
+					//This is "NULL" time
+					time_stamp->secs = 0;
+					time_stamp->nsecs = 0;
+				} else {
+					time_stamp->secs = (time_t)tmp64secs;
+					time_stamp->nsecs = (int)((tmpsecs / 4294967296.0) * 1000000000);
+				}
+			} else {
+				time_stamp->secs = 0;
+				time_stamp->nsecs = 0;
+				report_type_length_mismatch(tree, "an NTP time stamp", length, (length != 8));
 			}
 			break;
 
@@ -2280,6 +2344,29 @@ get_time_value(proto_tree *tree, tvbuff_t *tvb, const gint start,
 				report_type_length_mismatch(tree, "a time-in-milliseconds NTP time stamp", length, (length < 4));
 			}
 			break;
+
+		case ENC_TIME_CLASSIC_MAC_OS_SECS|ENC_BIG_ENDIAN:
+			/*
+			 * Classic Mac OS time stamps, big-endian.
+			 * Only supported for absolute times.
+			 */
+			DISSECTOR_ASSERT(!is_relative);
+
+			if (length == 8) {
+				tmp64secs  = tvb_get_ntoh64(tvb, start);
+				time_stamp->secs = (time_t)(gint64)(tmp64secs - EPOCH_DELTA_1904_01_01_00_00_00_UTC);
+				time_stamp->nsecs = 0;
+			} else if (length == 4) {
+				tmpsecs  = tvb_get_ntohl(tvb, start);
+				time_stamp->secs = (time_t)(gint32)(tmpsecs - EPOCH_DELTA_1904_01_01_00_00_00_UTC);
+				time_stamp->nsecs = 0;
+			} else {
+				time_stamp->secs  = 0;
+				time_stamp->nsecs = 0;
+				report_type_length_mismatch(tree, "an MP4 time stamp", length, (length < 4));
+			}
+			break;
+
 		default:
 			DISSECTOR_ASSERT_NOT_REACHED();
 			break;
@@ -2329,7 +2416,7 @@ test_length(header_field_info *hfinfo, tvbuff_t *tvb,
 		return;
 
 	if ((hfinfo->type == FT_STRINGZ) ||
-	    ((encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_QUIC)) &&
+	    ((encoding & (ENC_VARIANT_MASK)) &&
 	     (IS_FT_UINT(hfinfo->type) || IS_FT_INT(hfinfo->type)))) {
 		/* If we're fetching until the end of the TVB, only validate
 		 * that the offset is within range.
@@ -2434,7 +2521,12 @@ proto_tree_new_item(field_info *new_fi, proto_tree *tree,
 			} else if (encoding & ENC_VARINT_QUIC) {
 				new_fi->length = tvb_get_varint(tvb, start, (length == -1) ? FT_VARINT_MAX_LEN : length, &value64, encoding);
 				value = (guint32)value64;
-			} else {
+			} else if (encoding & ENC_VARINT_ZIGZAG) {
+				new_fi->length = tvb_get_varint(tvb, start, (length == -1) ? FT_VARINT_MAX_LEN : length, &value64, encoding);
+				new_fi->flags |= FI_VARINT;
+				value = (guint32)value64;
+			}
+			else {
 				/*
 				 * Map all non-zero values to little-endian for
 				 * backwards compatibility.
@@ -2457,7 +2549,11 @@ proto_tree_new_item(field_info *new_fi, proto_tree *tree,
 				new_fi->flags |= FI_VARINT;
 			} else if (encoding & ENC_VARINT_QUIC) {
 				new_fi->length = tvb_get_varint(tvb, start, (length == -1) ? FT_VARINT_MAX_LEN : length, &value64, encoding);
-			} else {
+			} else if (encoding & ENC_VARINT_ZIGZAG) {
+				new_fi->length = tvb_get_varint(tvb, start, (length == -1) ? FT_VARINT_MAX_LEN : length, &value64, encoding);
+				new_fi->flags |= FI_VARINT;
+			}
+			else {
 				/*
 				 * Map all other non-zero values to little-endian for
 				 * backwards compatibility.
@@ -2919,7 +3015,7 @@ proto_tree_add_item_ret_uint(proto_tree *tree, int hfindex, tvbuff_t *tvb,
 	}
 	/* I believe it's ok if this is called with a NULL tree */
 	/* XXX - modify if we ever support EBCDIC FT_CHAR */
-	if (encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_QUIC)) {
+	if (encoding & (ENC_VARIANT_MASK)) {
 		guint64 temp64;
 		tvb_get_varint(tvb, start, length, &temp64, encoding);
 		value = (guint32)temp64;
@@ -2946,7 +3042,7 @@ proto_tree_add_item_ret_uint(proto_tree *tree, int hfindex, tvbuff_t *tvb,
 	proto_tree_set_uint(new_fi, value);
 
 	new_fi->flags |= (encoding & ENC_LITTLE_ENDIAN) ? FI_LITTLE_ENDIAN : FI_BIG_ENDIAN;
-	if (encoding & ENC_VARINT_PROTOBUF) {
+	if (encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_ZIGZAG)) {
 		new_fi->flags |= FI_VARINT;
 	}
 	return proto_tree_add_node(tree, new_fi);
@@ -3199,14 +3295,14 @@ proto_tree_add_item_ret_uint64(proto_tree *tree, int hfindex, tvbuff_t *tvb,
 	/* length validation for native number encoding caught by get_uint64_value() */
 	/* length has to be -1 or > 0 regardless of encoding */
 	if (length < -1 || length == 0)
-		REPORT_DISSECTOR_BUG("Invalid length %d passed to proto_tree_add_item_ret_uint",
+		REPORT_DISSECTOR_BUG("Invalid length %d passed to proto_tree_add_item_ret_uint64",
 			length);
 
 	if (encoding & ENC_STRING) {
 		REPORT_DISSECTOR_BUG("wrong encoding");
 	}
 	/* I believe it's ok if this is called with a NULL tree */
-	if (encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_QUIC)) {
+	if (encoding & (ENC_VARIANT_MASK)) {
 		tvb_get_varint(tvb, start, length, &value, encoding);
 	} else {
 		value = get_uint64_value(tree, tvb, start, length, encoding);
@@ -3231,7 +3327,65 @@ proto_tree_add_item_ret_uint64(proto_tree *tree, int hfindex, tvbuff_t *tvb,
 	proto_tree_set_uint64(new_fi, value);
 
 	new_fi->flags |= (encoding & ENC_LITTLE_ENDIAN) ? FI_LITTLE_ENDIAN : FI_BIG_ENDIAN;
-	if (encoding & ENC_VARINT_PROTOBUF) {
+	if (encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_ZIGZAG)) {
+		new_fi->flags |= FI_VARINT;
+	}
+
+	return proto_tree_add_node(tree, new_fi);
+}
+
+proto_item *
+proto_tree_add_item_ret_int64(proto_tree *tree, int hfindex, tvbuff_t *tvb,
+	const gint start, gint length, const guint encoding, gint64 *retval)
+{
+	header_field_info *hfinfo = proto_registrar_get_nth(hfindex);
+	field_info	  *new_fi;
+	gint64		   value;
+
+	DISSECTOR_ASSERT_HINT(hfinfo != NULL, "Not passed hfi!");
+
+	switch (hfinfo->type) {
+	case FT_INT40:
+	case FT_INT48:
+	case FT_INT56:
+	case FT_INT64:
+		break;
+	default:
+		REPORT_DISSECTOR_BUG("field %s is not of type FT_INT40, FT_INT48, FT_INT56, or FT_INT64",
+			hfinfo->abbrev);
+	}
+
+	/* length validation for native number encoding caught by get_uint64_value() */
+	/* length has to be -1 or > 0 regardless of encoding */
+	if (length < -1 || length == 0)
+		REPORT_DISSECTOR_BUG("Invalid length %d passed to proto_tree_add_item_ret_int64",
+			length);
+
+	if (encoding & ENC_STRING) {
+		REPORT_DISSECTOR_BUG("wrong encoding");
+	}
+	/* I believe it's ok if this is called with a NULL tree */
+	if (encoding & (ENC_VARIANT_MASK)) {
+		tvb_get_varint(tvb, start, length, &value, encoding);
+	}
+	else {
+		value = get_int64_value(tree, tvb, start, length, encoding);
+	}
+
+	if (retval) {
+		*retval = value;
+	}
+
+	CHECK_FOR_NULL_TREE(tree);
+
+	TRY_TO_FAKE_THIS_ITEM(tree, hfinfo->id, hfinfo);
+
+	new_fi = new_field_info(tree, hfinfo, tvb, start, length);
+
+	proto_tree_set_int64(new_fi, value);
+
+	new_fi->flags |= (encoding & ENC_LITTLE_ENDIAN) ? FI_LITTLE_ENDIAN : FI_BIG_ENDIAN;
+	if (encoding & (ENC_VARINT_PROTOBUF | ENC_VARINT_ZIGZAG)) {
 		new_fi->flags |= FI_VARINT;
 	}
 
@@ -3288,7 +3442,7 @@ proto_tree_add_item_ret_varint(proto_tree *tree, int hfindex, tvbuff_t *tvb,
 	proto_tree_set_uint64(new_fi, value);
 
 	new_fi->flags |= (encoding & ENC_LITTLE_ENDIAN) ? FI_LITTLE_ENDIAN : FI_BIG_ENDIAN;
-	if (encoding & ENC_VARINT_PROTOBUF) {
+	if (encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_ZIGZAG)) {
 		new_fi->flags |= FI_VARINT;
 	}
 
@@ -3430,19 +3584,19 @@ proto_tree_add_item_ret_display_string_and_length(proto_tree *tree, int hfindex,
 	switch (hfinfo->type) {
 	case FT_STRING:
 		value = get_string_value(scope, tvb, start, length, lenretval, encoding);
-		*retval = hfinfo_format_text(scope, hfinfo, value);;
+		*retval = hfinfo_format_text(scope, hfinfo, value);
 		break;
 	case FT_STRINGZ:
 		value = get_stringz_value(scope, tree, tvb, start, length, lenretval, encoding);
-		*retval = hfinfo_format_text(scope, hfinfo, value);;
+		*retval = hfinfo_format_text(scope, hfinfo, value);
 		break;
 	case FT_UINT_STRING:
 		value = get_uint_string_value(scope, tree, tvb, start, length, lenretval, encoding);
-		*retval = hfinfo_format_text(scope, hfinfo, value);;
+		*retval = hfinfo_format_text(scope, hfinfo, value);
 		break;
 	case FT_STRINGZPAD:
 		value = get_stringzpad_value(scope, tvb, start, length, lenretval, encoding);
-		*retval = hfinfo_format_text(scope, hfinfo, value);;
+		*retval = hfinfo_format_text(scope, hfinfo, value);
 		break;
 	case FT_BYTES:
 		value = tvb_get_ptr(tvb, start, length);
@@ -3520,6 +3674,56 @@ proto_tree_add_item_ret_display_string(proto_tree *tree, int hfindex,
 {
 	return proto_tree_add_item_ret_display_string_and_length(tree, hfindex,
 	    tvb, start, length, encoding, scope, retval, &length);
+}
+
+proto_item *
+proto_tree_add_item_ret_time_string(proto_tree *tree, int hfindex,
+	tvbuff_t *tvb,
+	const gint start, gint length, const guint encoding,
+	wmem_allocator_t *scope, char **retval)
+{
+	proto_item *pi;
+	header_field_info *hfinfo = proto_registrar_get_nth(hfindex);
+	field_info	  *new_fi;
+	nstime_t    time_stamp;
+
+	DISSECTOR_ASSERT_HINT(hfinfo != NULL, "Not passed hfi!");
+
+	switch (hfinfo->type) {
+	case FT_ABSOLUTE_TIME:
+		get_time_value(tree, tvb, start, length, encoding, &time_stamp, FALSE);
+		*retval = abs_time_to_str(scope, &time_stamp, (absolute_time_display_e)hfinfo->display, TRUE);
+		break;
+	case FT_RELATIVE_TIME:
+		get_time_value(tree, tvb, start, length, encoding, &time_stamp, TRUE);
+		*retval = rel_time_to_secs_str(scope, &time_stamp);
+		break;
+	default:
+		REPORT_DISSECTOR_BUG("field %s is not of type FT_ABSOLUTE_TIME or FT_RELATIVE_TIME",
+			hfinfo->abbrev);
+	}
+
+	CHECK_FOR_NULL_TREE(tree);
+
+	TRY_TO_FAKE_THIS_ITEM(tree, hfinfo->id, hfinfo);
+
+	new_fi = new_field_info(tree, hfinfo, tvb, start, length);
+
+	switch (hfinfo->type) {
+
+	case FT_ABSOLUTE_TIME:
+	case FT_RELATIVE_TIME:
+		proto_tree_set_time(new_fi, &time_stamp);
+		break;
+	default:
+		g_assert_not_reached();
+	}
+
+	new_fi->flags |= (encoding & ENC_LITTLE_ENDIAN) ? FI_LITTLE_ENDIAN : FI_BIG_ENDIAN;
+
+	pi = proto_tree_add_node(tree, new_fi);
+
+	return pi;
 }
 
 /* Gets data from tvbuff, adds it to proto_tree, increments offset,
@@ -5596,7 +5800,7 @@ get_hfi_length(header_field_info *hfinfo, tvbuff_t *tvb, const gint start, gint 
 		 * of the string", and if the tvbuff if short, we just
 		 * throw an exception.
 		 *
-		 * For ENC_VARINT_PROTOBUF|ENC_VARINT_QUIC, it means "find the end of the string",
+		 * For ENC_VARINT_PROTOBUF|ENC_VARINT_QUIC|ENC_VARIANT_ZIGZAG, it means "find the end of the string",
 		 * and if the tvbuff if short, we just throw an exception.
 		 *
 		 * It's not valid for any other type of field.  For those
@@ -5607,7 +5811,7 @@ get_hfi_length(header_field_info *hfinfo, tvbuff_t *tvb, const gint start, gint 
 		 * Length would run past the end of the packet.
 		 */
 		if ((IS_FT_INT(hfinfo->type)) || (IS_FT_UINT(hfinfo->type))) {
-			if (encoding & ENC_VARINT_PROTOBUF) {
+			if (encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_ZIGZAG)) {
 				/*
 				 * Leave the length as -1, so our caller knows
 				 * it was -1.
@@ -5743,7 +5947,7 @@ get_full_length(header_field_info *hfinfo, tvbuff_t *tvb, const gint start,
 	case FT_INT48:
 	case FT_INT56:
 	case FT_INT64:
-		if (encoding & (ENC_VARINT_PROTOBUF|ENC_VARINT_QUIC)) {
+		if (encoding & (ENC_VARIANT_MASK)) {
 			if (length < -1) {
 				report_type_length_mismatch(NULL, "a FT_[U]INT", length, TRUE);
 			}
@@ -6940,7 +7144,7 @@ proto_register_protocol_in_name_only(const char *name, const char *short_name, c
 	protocol->heur_list = NULL;
 
 	/* List will be sorted later by name, when all protocols completed registering */
-	pino_protocols = g_list_prepend(pino_protocols, protocol);
+	protocols = g_list_prepend(protocols, protocol);
 
 	/* Here we allocate a new header_field_info struct */
 	hfinfo = g_slice_new(header_field_info);
@@ -7504,6 +7708,95 @@ proto_add_deregistered_data (void *data)
 	g_ptr_array_add(deregistered_data, data);
 }
 
+void proto_free_field_strings (ftenum_t field_type, unsigned int field_display, const void *field_strings)
+{
+	if (field_strings == NULL) {
+		return;
+	}
+
+	switch (field_type) {
+		case FT_FRAMENUM:
+			/* This is just an integer represented as a pointer */
+			break;
+		case FT_PROTOCOL: {
+			protocol_t *protocol = (protocol_t *)field_strings;
+			g_free((gchar *)protocol->short_name);
+			break;
+		}
+		case FT_BOOLEAN: {
+			true_false_string *tf = (true_false_string *)field_strings;
+			g_free((gchar *)tf->true_string);
+			g_free((gchar *)tf->false_string);
+			break;
+		}
+		case FT_UINT40:
+		case FT_INT40:
+		case FT_UINT48:
+		case FT_INT48:
+		case FT_UINT56:
+		case FT_INT56:
+		case FT_UINT64:
+		case FT_INT64: {
+			/*
+			 * XXX - if it's BASE_RANGE_STRING, or
+			 * BASE_EXT_STRING, should we free it?
+			 */
+			if (field_display & BASE_UNIT_STRING) {
+				unit_name_string *unit = (unit_name_string *)field_strings;
+				g_free((gchar *)unit->singular);
+				g_free((gchar *)unit->plural);
+			} else {
+				val64_string *vs64 = (val64_string *)field_strings;
+				while (vs64->strptr) {
+					g_free((gchar *)vs64->strptr);
+					vs64++;
+				}
+			}
+			break;
+		}
+		case FT_CHAR:
+		case FT_UINT8:
+		case FT_INT8:
+		case FT_UINT16:
+		case FT_INT16:
+		case FT_UINT24:
+		case FT_INT24:
+		case FT_UINT32:
+		case FT_INT32:
+		case FT_FLOAT:
+		case FT_DOUBLE: {
+			/*
+			 * XXX - if it's BASE_RANGE_STRING, or
+			 * BASE_EXT_STRING, should we free it?
+			 */
+			if (field_display & BASE_UNIT_STRING) {
+				unit_name_string *unit = (unit_name_string *)field_strings;
+				g_free((gchar *)unit->singular);
+				g_free((gchar *)unit->plural);
+			} else if (field_display & BASE_RANGE_STRING) {
+				range_string *rs = (range_string *)field_strings;
+				while (rs->strptr) {
+					g_free((gchar *)rs->strptr);
+					rs++;
+				}
+			} else {
+				value_string *vs = (value_string *)field_strings;
+				while (vs->strptr) {
+					g_free((gchar *)vs->strptr);
+					vs++;
+				}
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	if (field_type != FT_FRAMENUM) {
+		g_free((void *)field_strings);
+	}
+}
+
 static void
 free_deregistered_field (gpointer data, gpointer user_data _U_)
 {
@@ -7514,88 +7807,7 @@ free_deregistered_field (gpointer data, gpointer user_data _U_)
 	g_free((char *)hfi->abbrev);
 	g_free((char *)hfi->blurb);
 
-	if (hfi->strings) {
-		switch (hfi->type) {
-			case FT_FRAMENUM:
-				/* This is just an integer represented as a pointer */
-				break;
-			case FT_PROTOCOL: {
-				protocol_t *protocol = (protocol_t *)hfi->strings;
-				g_free((gchar *)protocol->short_name);
-				break;
-			}
-			case FT_BOOLEAN: {
-				true_false_string *tf = (true_false_string *)hfi->strings;
-				g_free ((gchar *)tf->true_string);
-				g_free ((gchar *)tf->false_string);
-				break;
-			}
-			case FT_UINT40:
-			case FT_INT40:
-			case FT_UINT48:
-			case FT_INT48:
-			case FT_UINT56:
-			case FT_INT56:
-			case FT_UINT64:
-			case FT_INT64: {
-				/*
-				 * XXX - if it's BASE_RANGE_STRING, or
-				 * BASE_EXT_STRING, should we free it?
-				 */
-				if (hfi->display & BASE_UNIT_STRING) {
-					unit_name_string *unit = (unit_name_string*)hfi->strings;
-					g_free ((gchar *)unit->singular);
-					g_free ((gchar *)unit->plural);
-				} else {
-					val64_string *vs64 = (val64_string *)hfi->strings;
-					while (vs64->strptr) {
-						g_free((gchar *)vs64->strptr);
-						vs64++;
-					}
-				}
-				break;
-			}
-			case FT_CHAR:
-			case FT_UINT8:
-			case FT_INT8:
-			case FT_UINT16:
-			case FT_INT16:
-			case FT_UINT24:
-			case FT_INT24:
-			case FT_UINT32:
-			case FT_INT32:
-			case FT_FLOAT:
-			case FT_DOUBLE: {
-				/*
-				 * XXX - if it's BASE_RANGE_STRING, or
-				 * BASE_EXT_STRING, should we free it?
-				 */
-				if (hfi->display & BASE_UNIT_STRING) {
-					unit_name_string *unit = (unit_name_string*)hfi->strings;
-					g_free ((gchar *)unit->singular);
-					g_free ((gchar *)unit->plural);
-                                } else  if (hfi->display & BASE_RANGE_STRING) {
-					range_string *rs = (range_string *)hfi->strings;
-					while (rs->strptr) {
-						g_free((gchar *)rs->strptr);
-						rs++;
-					}
-				} else {
-					value_string *vs = (value_string *)hfi->strings;
-					while (vs->strptr) {
-						g_free((gchar *)vs->strptr);
-						vs++;
-					}
-				}
-				break;
-			default:
-				break;
-			}
-		}
-		if (hfi->type != FT_FRAMENUM) {
-			g_free((void *)hfi->strings);
-		}
-	}
+	proto_free_field_strings(hfi->type, hfi->display, hfi->strings);
 
 	if (hfi->parent == -1)
 		g_slice_free(header_field_info, hfi);
@@ -8037,6 +8249,7 @@ tmp_fld_check_assert(header_field_info *hfinfo)
 		case FT_ABSOLUTE_TIME:
 			if (!(hfinfo->display == ABSOLUTE_TIME_LOCAL ||
 			      hfinfo->display == ABSOLUTE_TIME_UTC   ||
+			      hfinfo->display == ABSOLUTE_TIME_NTP_UTC   ||
 			      hfinfo->display == ABSOLUTE_TIME_DOY_UTC)) {
 				tmp_str = val_to_str_wmem(NULL, hfinfo->display, hf_display, "(Bit count: %d)");
 				g_error("Field '%s' (%s) is a %s but is being displayed as %s instead of as a time\n",

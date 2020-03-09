@@ -74,7 +74,6 @@ typedef struct tvbuff tvbuff_t;
  *    This (obviously) also applies to any tvbs chained to the tvb handed
  *    to the dissector.
  *  - Can create its own tvb chain (using tvb_new_real_data() which the
- *
  *    dissector is free to manage as desired.
  * @{
  */
@@ -762,9 +761,9 @@ WS_DLL_PUBLIC gboolean tvb_ascii_isprint(tvbuff_t *tvb, const gint offset,
  *  if "deseg" is false, return the amount of data remaining in
  *  the buffer.
  *
- * Set "*next_offset" to the offset of the character past the line
- * terminator, or past the end of the buffer if we don't find a line
- * terminator.  (It's not set if we return -1.)
+ * If "next_offset" is not NULL, set "*next_offset" to the offset of the
+ * character past the line terminator, or past the end of the buffer if
+ * we don't find a line terminator.  (It's not set if we return -1.)
  */
 WS_DLL_PUBLIC gint tvb_find_line_end(tvbuff_t *tvb, const gint offset, int len,
     gint *next_offset, const gboolean desegment);
@@ -783,9 +782,9 @@ WS_DLL_PUBLIC gint tvb_find_line_end(tvbuff_t *tvb, const gint offset, int len,
  * the end), or the amount of data remaining in the buffer if we don't
  * find a line terminator.
  *
- * Set "*next_offset" to the offset of the character past the line
- * terminator, or past the end of the buffer if we don't find a line
- * terminator.
+ * If "next_offset" is not NULL, set "*next_offset" to the offset of the
+ * character past the line terminator, or past the end of the buffer if
+ * we don't find a line terminator.
  */
 WS_DLL_PUBLIC gint tvb_find_line_end_unquoted(tvbuff_t *tvb, const gint offset,
     int len, gint *next_offset);
@@ -996,7 +995,13 @@ WS_DLL_PUBLIC tvbuff_t *tvb_child_uncompress_lznt1(tvbuff_t *parent,
 /* From tvbuff_base64.c */
 
 /** Return a tvb that contains the binary representation of a base64
- *  string
+ *  string as a child of the indicated tvb.
+ *
+ * @param parent The parent tvbuff.
+ * @param base64 The base64 encoded string which binary representation will be
+ *               returned in the child tvb.
+ *
+ * @return   A tvb with the binary representation of the base64 decoded string.
  */
 extern tvbuff_t* base64_to_tvb(tvbuff_t *parent, const char *base64);
 
@@ -1010,7 +1015,7 @@ extern tvbuff_t* base64_to_tvb(tvbuff_t *parent, const char *base64);
  * @param offset The offset in tvb from which we begin trying to extract integer.
  * @param maxlen The maximum distance from offset that we may try to extract integer
  * @param value  if parsing succeeds, parsed varint will store here.
- * @param encoding The ENC_* that defines the format (e.g., ENC_VARINT_PROTOBUF, ENC_VARINT_QUIC)
+ * @param encoding The ENC_* that defines the format (e.g., ENC_VARINT_PROTOBUF, ENC_VARINT_QUIC, ENC_VARINT_ZIGZAG)
  * @return   the length of this varint in tvb. 0 means parsing failed.
  */
 WS_DLL_PUBLIC guint tvb_get_varint(tvbuff_t *tvb, guint offset, guint maxlen, guint64 *value, const guint encoding);

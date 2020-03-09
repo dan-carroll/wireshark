@@ -33,7 +33,6 @@ public slots:
 
 signals:
     void showNameResolutionPreferences(const QString module_name);
-    void editAddressStatus(const QString &status);
     void redissectPackets();
 
 protected:
@@ -41,6 +40,7 @@ protected:
     virtual void keyPressEvent(QKeyEvent *event);
 
 private slots:
+    void displayPreviousUserDefinedHostname();
     void updateWidgets();
     void on_nameResolutionPreferencesToolButton_clicked();
     void on_addressComboBox_currentIndexChanged(const QString &);

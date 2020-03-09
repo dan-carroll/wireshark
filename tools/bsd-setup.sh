@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Setup development environment on BSD-like platforms.
 #
 # Tested on: FreeBSD, OpenBSD, NetBSD.
@@ -55,6 +55,8 @@ ADDITIONAL_LIST="\
 	libsmi \
 	brotli \
 	speexdsp \
+	zstd \
+	lua52 \
 	"
 
 # Guess which package manager we will use
@@ -116,15 +118,17 @@ echo "pkg-config is unavailable"
 
 # c-ares: FreeBSD
 # libcares: OpenBSD
-add_package ADDITIONAL_LIST c-ares ||
-add_package ADDITIONAL_LIST libcares ||
+add_package BASIC_LIST c-ares ||
+add_package BASIC_LIST libcares ||
 echo "c-ares is unavailable"
 
 # rubygem-asciidoctor: FreeBSD
 add_package ADDITIONAL_LIST rubygem-asciidoctor ||
 echo "asciidoctor is unavailable"
 
+# liblz4: FreeBSD
 # lz4: NetBSD
+add_package ADDITIONAL_LIST liblz4 ||
 add_package ADDITIONAL_LIST lz4 ||
 echo "lz4 is unavailable"
 
@@ -142,6 +146,10 @@ add_package ADDITIONAL_LIST ninja-build ||
 add_package ADDITIONAL_LIST ninja ||
 echo "ninja is unavailable"
 
+# libilbc: FreeBSD
+add_package ADDITIONAL_LIST libilbc ||
+echo "libilbc is unavailable"
+
 # Add OS-specific required/optional packages
 # Those not listed don't require additions.
 case `uname` in
@@ -156,18 +164,18 @@ esac
 ACTUAL_LIST=$BASIC_LIST
 
 # Now arrange for optional support libraries
-if [ $ADDITIONAL ]
+if [ "$ADDITIONAL" != "" ]
 then
 	ACTUAL_LIST="$ACTUAL_LIST $ADDITIONAL_LIST"
 fi
 
 $PM $PM_OPTIONS $ACTUAL_LIST $OPTIONS
-if [ $? != 0 ]
+if [ ! $? ]
 then
 	exit 2
 fi
 
-if [ ! $ADDITIONAL ]
+if [ "$ADDITIONAL" == "" ]
 then
-	echo "\n*** Optional packages not installed. Rerun with --install-optional to have them.\n"
+	echo -e "\n*** Optional packages not installed. Rerun with --install-optional to have them.\n"
 fi

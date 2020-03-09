@@ -1530,7 +1530,7 @@ dissect_rach_channel_info(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
             encoded = tvb_get_guint8(tvb, offset);
             propagation_delay = encoded * 3;
             propagation_delay_ti = proto_tree_add_uint_format(tree, hf_fp_propagation_delay, tvb, offset, 1,
-                                               propagation_delay, "%u chips (%u)",
+                                               propagation_delay, "Propagation Delay: %u chips (%u)",
                                                propagation_delay, encoded);
             offset++;
         }
@@ -2120,7 +2120,7 @@ dissect_cpch_channel_info(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
         encoded = tvb_get_guint8(tvb, offset);
         propagation_delay = encoded * 3;
         proto_tree_add_uint_format_value(tree, hf_fp_propagation_delay, tvb, offset, 1,
-                                               propagation_delay, "%u chips (%u)",
+                                               propagation_delay, "Propagation Delay: %u chips (%u)",
                                                propagation_delay, encoded);
         offset++;
         header_length = offset; /* XXX this might be wrong */
@@ -3549,9 +3549,8 @@ dissect_hsdsch_type_2_channel_info(tvbuff_t *tvb, packet_info *pinfo, proto_tree
             }
         }
 
-        if (header_length == 0) {
-            header_length = offset;
-        }
+        header_length = offset;
+
         /**********************************************/
         /* Optional fields indicated by earlier flags */
         if (drt_present) {
@@ -3812,9 +3811,8 @@ void dissect_hsdsch_common_channel_info(tvbuff_t *tvb, packet_info *pinfo, proto
                                    offset - block_header_start_offset);
             }
         }
-        if (header_length == 0) {
-            header_length = offset;
-        }
+
+        header_length = offset;
 
         /**********************************************/
         /* Optional fields indicated by earlier flags */
@@ -4938,7 +4936,7 @@ heur_dissect_fp_hsdsch_type_2(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tre
         return FALSE;
     }
 
-    captured_length = tvb_reported_length(tvb);
+    captured_length = tvb_captured_length(tvb);
     reported_length = tvb_reported_length(tvb);
     /* Lengths limit: header size + at least 1 PDU Block Header + CRC Payload size */
     if (captured_length < 11) {

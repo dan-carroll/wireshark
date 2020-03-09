@@ -43,7 +43,8 @@ public:
     int columnTextSize(const char *str);
     static void invalidateAllRecords() { col_data_ver_++; }
     static void resetColumns(column_info *cinfo);
-    void resetColorized();
+    static void resetColorization() { rows_color_ver_++; }
+
     inline int lineCount() { return lines_; }
     inline int lineCountChanged() { return line_count_changed_; }
 
@@ -60,10 +61,14 @@ private:
     static unsigned col_data_ver_;
     unsigned data_ver_;
     /** Has this record been colorized? */
+    static unsigned int rows_color_ver_;
+    unsigned int color_ver_;
     bool colorized_;
 
     /** Conversation. Used by RelatedPacketDelegate */
     unsigned int conv_index_;
+
+    bool read_failed_;
 
     void dissect(capture_file *cap_file, bool dissect_color = false);
     void cacheColumnStrings(column_info *cinfo);

@@ -23,7 +23,6 @@
 #include "packet-per.h"
 #include "packet-e212.h"
 #include "packet-gtpv2.h"
-#include "packet-ntp.h"
 
 #define PNAME  "M3 Application Protocol"
 #define PSNAME "M3AP"
@@ -120,12 +119,10 @@ dissect_m3ap(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_
   col_clear(pinfo->cinfo, COL_INFO);
 
   /* create the m3ap protocol tree */
-  if (tree) {
-    m3ap_item = proto_tree_add_item(tree, proto_m3ap, tvb, 0, -1, ENC_NA);
-    m3ap_tree = proto_item_add_subtree(m3ap_item, ett_m3ap);
+  m3ap_item = proto_tree_add_item(tree, proto_m3ap, tvb, 0, -1, ENC_NA);
+  m3ap_tree = proto_item_add_subtree(m3ap_item, ett_m3ap);
 
-    dissect_M3AP_PDU_PDU(tvb, pinfo, m3ap_tree, NULL);
-  }
+  dissect_M3AP_PDU_PDU(tvb, pinfo, m3ap_tree, NULL);
   return tvb_captured_length(tvb);
 }
 /*--- proto_register_m3ap -------------------------------------------*/
@@ -135,7 +132,7 @@ void proto_register_m3ap(void) {
   static hf_register_info hf[] = {
     { &hf_m3ap_Absolute_Time_ofMBMS_Data_value,
       { "Absolute-Time-ofMBMS-Data-value", "m3ap.Absolute_Time_ofMBMS_Data_value",
-         FT_STRING, BASE_NONE, NULL, 0,
+         FT_ABSOLUTE_TIME, ABSOLUTE_TIME_NTP_UTC, NULL, 0,
          NULL, HFILL }
     },
     { &hf_m3ap_IPAddress_v4,

@@ -2337,53 +2337,51 @@ dissect_dhcpopt_user_class_information(tvbuff_t *tvb, packet_info *pinfo, proto_
 {
 	guchar user_class_instance_index = 0;
 	int offset = 0;
-	guint32 class_length;
 	proto_item *vtix, *len_item;
 	proto_tree *o77_v_tree;
-	if (tvb_reported_length(tvb) < 2) {
+	guint class_length, uci_len = tvb_reported_length(tvb);
+	if (uci_len < 2) {
 		expert_add_info_format(pinfo, tree, &ei_dhcp_bad_length, "length isn't >= 2");
 		return 1;
 	}
 
-	if (!tvb_strneql(tvb, offset, "iPXE", 4)) {
-		/* The iPXE is known to violate RFC 3004, http://forum.ipxe.org/showthread.php?tid=7530 */
-		proto_item *expert_ti = proto_tree_add_item(tree, hf_dhcp_option77_user_class_data, tvb, offset, -1, ENC_NA);
-		expert_add_info(pinfo, expert_ti, &ei_dhcp_nonstd_option_data);
-		return tvb_captured_length(tvb);
-	}
-
 	while (tvb_reported_length_remaining(tvb, offset) > 0) {
+		class_length = tvb_get_guint8(tvb, offset);
+		if (class_length >= uci_len) {
+			/* Having the sum of the User Class data lengths exceed the total User Option Information length (uci_len)
+			 * is a violation of RFC 3004. In that case the remaining data is treated as a non-conformant (text) option.
+			 * This check will also catch the Microsoft 'variation' implementation (when Vendor class identifier contains
+			 * "MSFT 5.0") such as "RRAS.Microsoft" and others like "iPXE".
+			 * In the unlikely case that the first character can be interpreted as a valid length the next iteration
+			 * of this while loop will catch that.
+			 * https://bugs.wireshark.org/bugzilla/show_bug.cgi?id=16349
+			 * https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-dhcpe/fe8a2dd4-1e8c-4546-bacd-4ae10de02058
+			 */
+			proto_item *expert_ti = proto_tree_add_item(tree, hf_dhcp_option77_user_class_text, tvb, offset, uci_len, ENC_ASCII|ENC_NA);
+			expert_add_info(pinfo, expert_ti, &ei_dhcp_nonstd_option_data);
+			break;
+		}
+
 		/* Create subtree for instance of User Class. */
 		vtix = proto_tree_add_uint_format_value(tree, hf_dhcp_option77_user_class,
 				tvb, offset, 1, user_class_instance_index, "[%d]", user_class_instance_index);
 		o77_v_tree = proto_item_add_subtree(vtix, ett_dhcp_option77_instance);
 
-		if (!tvb_strneql(tvb, offset, "RRAS.Microsoft", 14)) {
-			/* MS have this non-conformant option:
-			 *
-			 *   https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-dhcpe/a7be26f5-659d-4912-b715-0481b9d84e95
-			 */
-			class_length = 14;
-			proto_item *expert_ti = proto_tree_add_item(o77_v_tree, hf_dhcp_option77_user_class_text, tvb, offset, class_length, ENC_ASCII|ENC_NA);
-			expert_add_info(pinfo, expert_ti, &ei_dhcp_nonstd_option_data);
-			proto_item_set_len(vtix, class_length);
-		}
-		else {
-			/* Add length for instance of User Class. */
-			len_item = proto_tree_add_item_ret_uint(o77_v_tree, hf_dhcp_option77_user_class_length,
-					tvb, offset, 1, ENC_BIG_ENDIAN, &class_length);
-			proto_item_set_len(vtix, class_length+1);
-			offset += 1;
+		/* Add length for instance of User Class. */
+		len_item = proto_tree_add_uint(o77_v_tree, hf_dhcp_option77_user_class_length, tvb, offset, 1, class_length);
+		proto_item_set_len(vtix, class_length+1);
+		offset++;
 
-			if (class_length == 0) {
-				expert_add_info_format(pinfo, len_item, &ei_dhcp_bad_length, "UC_Len_%u isn't >= 1 (UC_Len_%u = 0)", user_class_instance_index, user_class_instance_index);
-				break;
-			}
-
-			/* Add data for instance of User Class. */
-			proto_tree_add_item(o77_v_tree, hf_dhcp_option77_user_class_data, tvb, offset, class_length, ENC_NA);
+		if (class_length == 0) {
+			expert_add_info_format(pinfo, len_item, &ei_dhcp_bad_length, "UC_Len_%u isn't >= 1 (UC_Len_%u = 0)", user_class_instance_index, user_class_instance_index);
+			break;
 		}
+
+		/* Add data for instance of User Class. */
+		proto_tree_add_item(o77_v_tree, hf_dhcp_option77_user_class_data, tvb, offset, class_length, ENC_NA);
+
 		offset += class_length;
+		uci_len -= class_length + 1;
 		user_class_instance_index++;
 	}
 
@@ -2449,8 +2447,8 @@ dissect_dhcpopt_client_full_domain_name(tvbuff_t *tvb, packet_info *pinfo, proto
 	};
 	guint8 fqdn_flags;
 	int offset = 0, length = tvb_reported_length(tvb);
-	const guchar	*dns_name;
-	guint			dns_name_len;
+	const gchar	*dns_name;
+	guint		dns_name_len;
 
 	if (length < 3) {
 		expert_add_info_format(pinfo, tree, &ei_dhcp_bad_length, "length isn't >= 3");
@@ -2774,8 +2772,9 @@ static int
 dissect_dhcpopt_dhcp_domain_search(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, void* data _U_)
 {
 	int length = tvb_reported_length(tvb);
-	const guchar	*dns_name;
-	guint			dns_name_len;
+        gchar		*name_out;
+	const gchar	*dns_name;
+	guint		dns_name_len;
 
 	/* Encoding Long Options in the Dynamic Host Configuration Protocol (DHCPv4) (RFC 3396) */
 	/* Domain Names - Implementation And Specification (RFC 1035) */
@@ -2810,12 +2809,13 @@ dissect_dhcpopt_dhcp_domain_search(tvbuff_t *tvb, packet_info *pinfo _U_, proto_
 			/* use the get_dns_name method that manages all techniques of RFC 1035 (compression pointer and so on) */
 			consumedx = get_dns_name(rfc3396_dns_domain_search_list.tvb_composite, composite_offset,
 				tvb_reported_length(rfc3396_dns_domain_search_list.tvb_composite), 0, &dns_name, &dns_name_len);
+                        name_out = format_text(wmem_packet_scope(), dns_name, dns_name_len);
 			if (rfc3396_dns_domain_search_list.total_number_of_block == 1) {
 				/* RFC 3396 is not used, so we can easily link the fqdn with v_tree. */
-				proto_tree_add_string(tree, hf_dhcp_option_dhcp_dns_domain_search_list_fqdn, tvb, composite_offset, consumedx, dns_name);
+				proto_tree_add_string(tree, hf_dhcp_option_dhcp_dns_domain_search_list_fqdn, tvb, composite_offset, consumedx, name_out);
 			} else {
 				/* RFC 3396 is used, so the option is split into several option 119. We don't link fqdn with v_tree. */
-				proto_tree_add_string(tree, hf_dhcp_option_dhcp_dns_domain_search_list_fqdn, tvb, 0, 0, dns_name);
+				proto_tree_add_string(tree, hf_dhcp_option_dhcp_dns_domain_search_list_fqdn, tvb, 0, 0, name_out);
 			}
 			composite_offset += consumedx;
 		}
@@ -2829,8 +2829,9 @@ static int
 dissect_dhcpopt_sip_servers(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
 {
 	int length = tvb_reported_length(tvb);
-	const guchar	*dns_name;
-	guint			dns_name_len;
+	const gchar	*dns_name;
+	guint		dns_name_len;
+        gchar           *name_out;
 
 	/* Encoding Long Options in the Dynamic Host Configuration Protocol (DHCPv4) (RFC 3396) */
 	/* Domain Names - Implementation And Specification (RFC 1035) */
@@ -2882,13 +2883,14 @@ dissect_dhcpopt_sip_servers(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
 				/* use the get_dns_name method that manages all techniques of RFC 1035 (compression pointer and so on) */
 				consumedx = get_dns_name(rfc3396_sip_server.tvb_composite, composite_offset, tvb_reported_length(rfc3396_sip_server.tvb_composite),
 					1 /* ignore enc */, &dns_name, &dns_name_len);
+                                name_out = format_text(wmem_packet_scope(), dns_name, dns_name_len);
 
 				if (rfc3396_sip_server.total_number_of_block == 1) {
 					/* RFC 3396 is not used, so we can easily link the fqdn with v_tree. */
-					proto_tree_add_string(tree, hf_dhcp_option_sip_server_name, tvb, composite_offset, consumedx, dns_name);
+					proto_tree_add_string(tree, hf_dhcp_option_sip_server_name, tvb, composite_offset, consumedx, name_out);
 				} else {
 					/* RFC 3396 is used, so the option is split into several option 120. We don't link fqdn with v_tree. */
-					proto_tree_add_string(tree, hf_dhcp_option_sip_server_name, tvb, 0, 0, format_text(wmem_packet_scope(), dns_name, dns_name_len));
+					proto_tree_add_string(tree, hf_dhcp_option_sip_server_name, tvb, 0, 0, name_out);
 				}
 				composite_offset += consumedx;
 			}
@@ -3082,7 +3084,7 @@ static int
 dissect_dhcpopt_rdnss(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
 {
 	int offset = 0;
-	const guchar *dns_name;
+	const gchar *dns_name;
 	guint dns_name_len;
 
 	if (tvb_reported_length(tvb) < 10) {
@@ -6603,7 +6605,7 @@ dissect_packetcable_ietf_ccc(packet_info *pinfo, proto_item *v_ti, proto_tree *v
 	proto_tree   *pkt_s_tree;
 	proto_item   *vti;
 	int	      max_timer_val = 255;
-	const guchar *dns_name;
+	const gchar  *dns_name;
 	guint         dns_name_len;
 
 	subopt = tvb_get_guint8(tvb, suboptoff);

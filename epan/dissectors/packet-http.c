@@ -37,6 +37,7 @@
 #include "packet-http.h"
 #include "packet-tcp.h"
 #include "packet-tls.h"
+#include "packet-acdr.h"
 
 #include <ui/tap-credentials.h>
 
@@ -421,6 +422,7 @@ const value_string vals_http_status_code[] = {
 	{ 422, "Unprocessable Entity"},            /* RFC 4918 */
 	{ 423, "Locked"},                          /* RFC 4918 */
 	{ 424, "Failed Dependency"},               /* RFC 4918 */
+	{ 425, "Too Early"},                       /* RFC 8470 */
 	{ 426, "Upgrade Required"},                /* RFC 2817 */
 	{ 428, "Precondition Required"},           /* RFC 6585 */
 	{ 429, "Too Many Requests"},               /* RFC 6585 */
@@ -3597,6 +3599,13 @@ dissect_http_on_stream(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
 			} else {
 				call_data_dissector(tvb_new_subset_remaining(tvb, offset), pinfo, tree);
 			}
+			/*
+			 * If a subdissector requests reassembly, be sure not to
+			 * include the preceding HTTP headers.
+			 */
+			if (pinfo->desegment_len) {
+				pinfo->desegment_offset += offset;
+			}
 			break;
 		}
 		len = dissect_http_message(tvb, offset, pinfo, tree, conv_data, "HTTP", proto_http, end_of_stream);
@@ -4275,6 +4284,10 @@ proto_reg_handoff_http(void)
 	stats_tree_register("http", "http_req", "HTTP/Requests",         0, http_req_stats_tree_packet,  http_req_stats_tree_init, NULL );
 	stats_tree_register("http", "http_srv", "HTTP/Load Distribution",0, http_reqs_stats_tree_packet, http_reqs_stats_tree_init, NULL );
 	stats_tree_register("http", "http_seq", "HTTP/Request Sequences",0, http_seq_stats_tree_packet,  http_seq_stats_tree_init, NULL );
+
+	dissector_add_uint("acdr.tls_application_port", 443, http_handle);
+	dissector_add_uint("acdr.tls_application", TLS_APP_HTTP, http_handle);
+	dissector_add_uint("acdr.tls_application", TLS_APP_TR069, http_handle);
 }
 
 /*

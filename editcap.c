@@ -1017,11 +1017,13 @@ main(int argc, char *argv[])
     int           i, j, read_err, write_err;
     gchar        *read_err_info, *write_err_info;
     int           opt;
-#define LONGOPT_NO_VLAN              0x8100
-#define LONGOPT_SKIP_RADIOTAP_HEADER 0x8101
-#define LONGOPT_SEED                 0x8102
-#define LONGOPT_INJECT_SECRETS       0x8103
-#define LONGOPT_DISCARD_ALL_SECRETS  0x8104
+
+#define LONGOPT_NO_VLAN              LONGOPT_BASE_APPLICATION+1
+#define LONGOPT_SKIP_RADIOTAP_HEADER LONGOPT_BASE_APPLICATION+2
+#define LONGOPT_SEED                 LONGOPT_BASE_APPLICATION+3
+#define LONGOPT_INJECT_SECRETS       LONGOPT_BASE_APPLICATION+4
+#define LONGOPT_DISCARD_ALL_SECRETS  LONGOPT_BASE_APPLICATION+5
+
     static const struct option long_options[] = {
         {"novlan", no_argument, NULL, LONGOPT_NO_VLAN},
         {"skip-radiotap-header", no_argument, NULL, LONGOPT_SKIP_RADIOTAP_HEADER},
@@ -1439,19 +1441,6 @@ main(int argc, char *argv[])
         srand(seed);
     }
 
-    if (check_startstop && !stoptime) {
-        struct tm stoptm;
-
-        /* XXX: will work until 2035 */
-        memset(&stoptm,0,sizeof(struct tm));
-        stoptm.tm_year = 135;
-        stoptm.tm_mday = 31;
-        stoptm.tm_mon = 11;
-        stoptm.tm_isdst = -1;
-
-        stoptime = mktime(&stoptm);
-    }
-
     if (starttime > stoptime) {
         fprintf(stderr, "editcap: start time is after the stop time\n");
         ret = INVALID_OPTION;
@@ -1690,14 +1679,20 @@ main(int argc, char *argv[])
         } /* split packet handling */
 
         if (check_startstop) {
+            ts_okay = FALSE;
             /*
              * Is the packet in the selected timeframe?
              * If the packet has no time stamp, the answer is "no".
              */
-            if (rec->presence_flags & WTAP_HAS_TS)
-                ts_okay = (rec->ts.secs >= starttime) && (rec->ts.secs < stoptime);
-            else
-                ts_okay = FALSE;
+            if (rec->presence_flags & WTAP_HAS_TS) {
+                if (starttime && stoptime) {
+                    ts_okay = (rec->ts.secs >= starttime) && (rec->ts.secs < stoptime);
+                } else if (starttime) {
+                    ts_okay = rec->ts.secs >= starttime;
+                } else if (stoptime) {
+                    ts_okay = rec->ts.secs < stoptime;
+                }
+            }
         } else {
             /*
              * No selected timeframe, so all packets are "in the

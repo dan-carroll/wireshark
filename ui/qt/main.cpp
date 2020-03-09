@@ -79,6 +79,7 @@
 #include "ui/commandline.h"
 #include "ui/capture_ui_utils.h"
 #include "ui/preference_utils.h"
+#include "ui/software_update.h"
 #include "ui/taps.h"
 
 #include "ui/qt/conversation_dialog.h"
@@ -137,8 +138,8 @@
 # INFO     = 64
 # DEBUG    = 128
 
-*/
 #define DEBUG_STARTUP_TIME_LOGLEVEL 252
+*/
 
 /* update the main window */
 void main_window_update(void)
@@ -226,6 +227,14 @@ get_gui_compiled_info(GString *str)
     g_string_append(str, "without QtMultimedia");
 #endif
 
+    g_string_append(str, ", ");
+    const char *update_info = software_update_info();
+    if (update_info) {
+        g_string_append_printf(str, "with automatic updates using %s", update_info);
+    } else {
+        g_string_append_printf(str, "without automatic updates");
+    }
+
 #ifdef _WIN32
     g_string_append(str, ", ");
 #ifdef HAVE_AIRPCAP
@@ -239,27 +248,6 @@ get_gui_compiled_info(GString *str)
     g_string_append(str, ", with SpeexDSP (using system library)");
 #else
     g_string_append(str, ", with SpeexDSP (using bundled resampler)");
-#endif
-
-    /* SBC */
-#ifdef HAVE_SBC
-    g_string_append(str, ", with SBC");
-#else
-    g_string_append(str, ", without SBC");
-#endif
-
-    /* SpanDSP (G.722, G.726) */
-#ifdef HAVE_SPANDSP
-    g_string_append(str, ", with SpanDSP");
-#else
-    g_string_append(str, ", without SpanDSP");
-#endif
-
-    /* BCG729 (G.729) */
-#ifdef HAVE_BCG729
-    g_string_append(str, ", with bcg729");
-#else
-    g_string_append(str, ", without bcg729");
 #endif
 }
 
@@ -308,14 +296,13 @@ g_log_message_handler(QtMsgType type, const QMessageLogContext &, const QString 
     GLogLevelFlags log_level = G_LOG_LEVEL_DEBUG;
 
     switch (type) {
-    case QtDebugMsg:
-    default:
-        break;
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 5, 0))
     case QtInfoMsg:
         log_level = G_LOG_LEVEL_INFO;
         break;
 #endif
+    // We want qDebug() messages to show up at our default log level.
+    case QtDebugMsg:
     case QtWarningMsg:
         log_level = G_LOG_LEVEL_WARNING;
         break;
@@ -324,6 +311,8 @@ g_log_message_handler(QtMsgType type, const QMessageLogContext &, const QString 
         break;
     case QtFatalMsg:
         log_level = G_LOG_FLAG_FATAL;
+        break;
+    default:
         break;
     }
     g_log(LOG_DOMAIN_MAIN, log_level, "%s", qUtf8Printable(msg));
@@ -335,11 +324,8 @@ g_log_message_handler(QtMsgType type, const QMessageLogContext &, const QString 
  *  we pop up will be above the main window.
  */
 static void
-check_and_warn_user_startup(const QString &cf_name)
+check_and_warn_user_startup()
 {
-#ifndef _WIN32
-    Q_UNUSED(cf_name)
-#endif
     gchar               *cur_user, *cur_group;
 
     /* Tell the user not to run as root. */
@@ -355,16 +341,6 @@ check_and_warn_user_startup(const QString &cf_name)
         g_free(cur_user);
         g_free(cur_group);
     }
-
-#ifdef _WIN32
-    /* Warn the user if npf.sys isn't loaded. */
-    if (!get_stdin_capture() && cf_name.isEmpty() && !npf_sys_is_running() && recent.privs_warn_if_no_npf) {
-        simple_message_box(ESD_TYPE_WARN, &recent.privs_warn_if_no_npf, "%s",
-        "The NPF driver isn't running. You may have trouble\n"
-        "capturing or listing interfaces.");
-    }
-#endif
-
 }
 #endif
 
@@ -503,7 +479,7 @@ int main(int argc, char *qt_argv[])
         /* load the airpcap interfaces */
         g_airpcap_if_list = get_airpcap_interface_list(&err, &err_str);
 
-        if (g_airpcap_if_list == NULL || g_list_length(g_airpcap_if_list) == 0){
+        if (g_airpcap_if_list == NULL || g_list_length(g_airpcap_if_list) == 0) {
             if (err == CANT_GET_AIRPCAP_INTERFACE_LIST && err_str != NULL) {
                 simple_dialog(ESD_TYPE_ERROR, ESD_BTN_OK, "%s", "Failed to open Airpcap Adapters.");
                 g_free(err_str);
@@ -542,8 +518,8 @@ int main(int argc, char *qt_argv[])
     /* Create the user profiles directory */
     if (create_profiles_dir(&rf_path) == -1) {
         simple_dialog(ESD_TYPE_WARN, ESD_BTN_OK,
-                      "Could not create profiles directory\n\"%s\"",
-                      rf_path);
+                      "Could not create profiles directory\n\"%s\": %s.",
+                      rf_path, strerror(errno));
         g_free (rf_path);
     }
 
@@ -885,7 +861,7 @@ int main(int argc, char *qt_argv[])
                filter. */
             start_requested_stats();
 
-            if(global_commandline_info.go_to_packet != 0) {
+            if (global_commandline_info.go_to_packet != 0) {
                 /* Jump to the specified frame number, kept for backward
                    compatibility. */
                 cf_goto_frame(CaptureFile::globalCapFile(), global_commandline_info.go_to_packet);
@@ -919,7 +895,7 @@ int main(int argc, char *qt_argv[])
                 g_free(s);
             }
             /* "-k" was specified; start a capture. */
-            check_and_warn_user_startup(cf_name);
+            check_and_warn_user_startup();
 
             /* If no user interfaces were specified on the command line,
                copy the list of selected interfaces to the set of interfaces

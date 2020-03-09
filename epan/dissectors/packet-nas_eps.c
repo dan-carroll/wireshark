@@ -9,7 +9,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * References: 3GPP TS 24.301 V15.6.0 (2019-03)
+ * References: 3GPP TS 24.301 V16.1.1 (2019-06)
  */
 
 #include "config.h"
@@ -44,6 +44,7 @@ static dissector_handle_t lpp_handle;
 static dissector_handle_t nbifom_handle;
 static dissector_handle_t ipv4_handle;
 static dissector_handle_t ipv6_handle;
+static dissector_handle_t non_ip_data_handle;
 
 /* Forward declaration */
 static void disect_nas_eps_esm_msg(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, int offset);
@@ -284,6 +285,12 @@ static int hf_nas_eps_emm_switch_off = -1;
 static int hf_nas_eps_emm_detach_type_UL = -1;
 static int hf_nas_eps_emm_detach_type_DL = -1;
 
+static int hf_emm_5g_up_ciot_b3 = -1;
+static int hf_emm_5g_hc_cp_ciot = -1;
+static int hf_emm_n3_data = -1;
+static int hf_emm_5g_cp_ciot = -1;
+
+
 static int hf_nas_eps_esm_qci = -1;
 static int hf_nas_eps_esm_mbr_ul = -1;
 static int hf_nas_eps_esm_mbr_dl = -1;
@@ -320,7 +327,6 @@ static int hf_nas_eps_esm_remote_ue_context_list_ue_context_ipv6_prefix = -1;
 static int hf_nas_eps_esm_pkmf_address_type = -1;
 static int hf_nas_eps_esm_pkmf_ipv4 = -1;
 static int hf_nas_eps_esm_pkmf_ipv6 = -1;
-static int hf_nas_eps_esm_spare_bit0x80 = -1;
 static int hf_nas_eps_esm_hdr_comp_config_prof_0104 = -1;
 static int hf_nas_eps_esm_hdr_comp_config_prof_0103 = -1;
 static int hf_nas_eps_esm_hdr_comp_config_prof_0102 = -1;
@@ -374,6 +380,8 @@ static int hf_nas_eps_gen_msg_cont = -1;
 static int hf_nas_eps_cmn_add_info = -1;
 static int hf_nas_eps_esm_request_type = -1;
 
+static int hf_nas_eps_spare_b7_b4 = -1;
+
 /* ESM */
 static int hf_nas_eps_msg_esm_type = -1;
 int hf_nas_eps_esm_elem_id = -1;
@@ -404,7 +412,19 @@ static expert_field ei_nas_eps_missing_mandatory_elemen = EI_INIT;
 /* Global variables */
 static gboolean g_nas_eps_dissect_plain = FALSE;
 static gboolean g_nas_eps_null_decipher = TRUE;
-static gboolean g_nas_eps_user_data_container_as_ip = TRUE;
+enum {
+    DECODE_USER_DATA_AS_NONE,
+    DECODE_USER_DATA_AS_IP,
+    DECODE_USER_DATA_AS_NON_IP
+};
+static const enum_val_t nas_eps_user_data_container_as_vals[] = {
+    {"none", "None", DECODE_USER_DATA_AS_NONE},
+    {"ip", "IP", DECODE_USER_DATA_AS_IP},
+    {"non_ip","Non IP", DECODE_USER_DATA_AS_NON_IP},
+    {NULL, NULL, -1}
+};
+static gint g_nas_eps_decode_user_data_container_as = DECODE_USER_DATA_AS_NONE;
+static const gchar *g_nas_eps_non_ip_data_dissector = "";
 
 /* Table 9.8.1: Message types for EPS mobility management
  *  0   1   -   -   -   -   -   -       EPS mobility management messages
@@ -508,23 +528,25 @@ static const value_string security_header_type_vals[] = {
 };
 static value_string_ext security_header_type_vals_ext = VALUE_STRING_EXT_INIT(security_header_type_vals);
 
+/*
 typedef enum
 {
-    DE_EPS_CMN_ADD_INFO,                        /* 9.9.2.0  Additional information */
-    DE_EPS_CMN_DEVICE_PROPERTIES,               /* 9.9.2.0A Device properties */
-    DE_EPS_CMN_EPS_BE_CTX_STATUS,               /* 9.9.2.1  EPS bearer context status */
-    DE_EPS_CMN_LOC_AREA_ID,                     /* 9.9.2.2  Location area identification */
-    DE_EPS_CMN_MOB_ID,                          /* 9.9.2.3  Mobile identity */
-    DE_EPS_MS_CM_2,                             /* 9.9.2.4  Mobile station classmark 2 */
-    DE_EPS_MS_CM_3,                             /* 9.9.2.5  Mobile station classmark 3 */
-    DE_EPS_NAS_SEC_PAR_FROM_EUTRA,              /* 9.9.2.6  NAS security parameters from E-UTRA */
-    DE_EPS_NAS_SEC_PAR_TO_EUTRA,                /* 9.9.2.7  NAS security parameters to E-UTRA */
+    DE_EPS_CMN_ADD_INFO,                          9.9.2.0  Additional information
+    DE_EPS_CMN_DEVICE_PROPERTIES,                 9.9.2.0A Device properties
+    DE_EPS_CMN_EPS_BE_CTX_STATUS,                 9.9.2.1  EPS bearer context status
+    DE_EPS_CMN_LOC_AREA_ID,                       9.9.2.2  Location area identification
+    DE_EPS_CMN_MOB_ID,                            9.9.2.3  Mobile identity
+    DE_EPS_MS_CM_2,                               9.9.2.4  Mobile station classmark 2
+    DE_EPS_MS_CM_3,                               9.9.2.5  Mobile station classmark 3
+    DE_EPS_NAS_SEC_PAR_FROM_EUTRA,                9.9.2.6  NAS security parameters from E-UTRA
+    DE_EPS_NAS_SEC_PAR_TO_EUTRA,                  9.9.2.7  NAS security parameters to E-UTRA
 
-    DE_EPS_CMN_PLM_LST,                         /* 9.9.2.8  PLMN list */
-    DE_EPS_CMN_SUP_CODEC_LST,                   /* 9.9.2.6  9.9.2.10    Supported codec list */
-    DE_EPS_COMMON_NONE                          /* NONE */
+    DE_EPS_CMN_PLM_LST,                           9.9.2.8  PLMN list
+    DE_EPS_CMN_SUP_CODEC_LST,                     9.9.2.6  9.9.2.10    Supported codec list
+    DE_EPS_COMMON_NONE                            NONE
 }
 nas_eps_common_elem_idx_t;
+*/
 
 static const value_string nas_eps_common_elem_strings[] = {
     { DE_EPS_CMN_ADD_INFO, "Additional information" },                       /* 9.9.2.0  Additional information */
@@ -861,6 +883,7 @@ static const value_string nas_emm_elem_strings[] = {
     { DE_EMM_UE_STATUS, "UE status" },                                         /* 9.9.3.54 UE status */
     { DE_EMM_ADD_INFO_REQ, "Additional information requested" },               /* 9.9.3.55 Additional information requested */
     { DE_EMM_CIPH_KEY_DATA, "Ciphering key data" },                            /* 9.9.3.56 Ciphering key data */
+    { DE_EMM_N1_UE_NETWORK_CAP, "N1 UE network capability" },                  /* 9.9.3.57 N1 UE network capability */
     { 0, NULL }
 };
 value_string_ext nas_emm_elem_strings_ext = VALUE_STRING_EXT_INIT(nas_emm_elem_strings);
@@ -946,6 +969,7 @@ typedef enum
     DE_EMM_UE_STATUS,           /* 9.9.3.54 UE status */
     DE_EMM_ADD_INFO_REQ         /* 9.9.3.55 Additional information requested */
     DE_EMM_CIPH_KEY_DATA,       /* 9.9.3.56 Ciphering key data */
+    DE_EMM_N1_UE_NETWORK_CAP,   /* 9.9.3.57 N1 UE network capability */
     DE_EMM_NONE                 /* NONE */
 }
 nas_emm_elem_idx_t;
@@ -1198,6 +1222,7 @@ const value_string nas_eps_emm_cause_values[] = {
     { 0x18, "Security mode rejected, unspecified"},
     { 0x19, "Not authorized for this CSG"},
     { 0x1a, "Non-EPS authentication unacceptable"},
+    { 0x1f, "Redirection to 5GCN required"},
     { 0x23, "Requested service option not authorized in this PLMN"},
     { 0x27, "CS service temporarily not available"},
     { 0x28, "No EPS bearer context activated"},
@@ -2788,6 +2813,26 @@ de_emm_ciph_key_data(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo, guint3
 }
 
 /*
+ * 9.9.3.57    N1 UE network capability
+ */
+static guint16
+de_emm_n1_ue_network_cap(tvbuff_t* tvb, proto_tree* tree, packet_info* pinfo _U_,
+    guint32 offset, guint len _U_, gchar* add_string _U_, int string_len _U_)
+{
+    static const int* flags_oct1[] = {
+        &hf_nas_eps_spare_b7_b4,
+        &hf_emm_5g_up_ciot_b3,
+        &hf_emm_5g_hc_cp_ciot,
+        &hf_emm_n3_data,
+        &hf_emm_5g_cp_ciot,
+        NULL
+    };
+
+    proto_tree_add_bitmask_list(tree, tvb, offset, 1, flags_oct1, ENC_NA);
+
+    return 1;
+}
+/*
  * 9.9.4    EPS Session Management (ESM) information elements
  */
 
@@ -3593,7 +3638,7 @@ de_esm_hdr_compr_config(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_,
     guint32 curr_offset = offset;
 
     static const int * flags[] = {
-        &hf_nas_eps_esm_spare_bit0x80,
+        &hf_nas_eps_spare_b7,
         &hf_nas_eps_esm_hdr_comp_config_prof_0104,
         &hf_nas_eps_esm_hdr_comp_config_prof_0103,
         &hf_nas_eps_esm_hdr_comp_config_prof_0102,
@@ -3646,21 +3691,24 @@ de_esm_user_data_cont(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U_,
     proto_item *it;
 
     it = proto_tree_add_item(tree, hf_nas_eps_esm_user_data_cont, tvb, offset, len, ENC_NA);
-    if (g_nas_eps_user_data_container_as_ip) {
+    if (g_nas_eps_decode_user_data_container_as != DECODE_USER_DATA_AS_NONE) {
         proto_tree *subtree;
         tvbuff_t *user_data_cont_tvb;
         volatile dissector_handle_t handle;
-        guint8 first_byte;
 
         subtree = proto_item_add_subtree(it, ett_nas_eps_esm_user_data_cont);
         user_data_cont_tvb = tvb_new_subset_length_caplen(tvb, offset, len, len);
-        first_byte = tvb_get_guint8(user_data_cont_tvb, 0);
-        if (first_byte >= 0x45 && first_byte <= 0x4f && len > 20)
-            handle = ipv4_handle;
-        else if ((first_byte & 0xf0) == 0x60 && len > 40)
-            handle = ipv6_handle;
-        else
-            handle = NULL;
+        if (g_nas_eps_decode_user_data_container_as == DECODE_USER_DATA_AS_IP) {
+            guint8 first_byte = tvb_get_guint8(user_data_cont_tvb, 0);
+            if (first_byte >= 0x45 && first_byte <= 0x4f && len > 20)
+                handle = ipv4_handle;
+            else if ((first_byte & 0xf0) == 0x60 && len > 40)
+                handle = ipv6_handle;
+            else
+                handle = NULL;
+        } else {
+            handle = non_ip_data_handle;
+        }
         if (handle) {
             col_append_str(pinfo->cinfo, COL_PROTOCOL, "/");
             col_set_fence(pinfo->cinfo, COL_PROTOCOL);
@@ -3839,7 +3887,7 @@ de_esm_ext_apn_agr_max_br(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo _U
 }
 
 /*
- * 9.9.4.29 Extended EPS quality of service
+ * 9.9.4.30 Extended EPS quality of service
  */
 static const range_string nas_eps_ext_eps_qos_unit_vals[] = {
     { 0x00, 0x00, "Not used" },
@@ -3998,6 +4046,7 @@ guint16 (*emm_elem_fcn[])(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo, g
     NULL,                       /* 9.9.3.54 UE status */
     de_emm_add_info_req,        /* 9.9.3.55 Additional information requested */
     de_emm_ciph_key_data,       /* 9.9.3.56 Ciphering key data */
+    de_emm_n1_ue_network_cap,   /* 9.9.3.57 N1 UE network capability */
     NULL,   /* NONE */
 };
 
@@ -4336,6 +4385,8 @@ nas_emm_attach_req(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo, guint32 
     ELEM_OPT_TLV(0x6D, NAS_5GS_PDU_TYPE_MM, DE_NAS_5GS_MM_UE_STATUS, NULL);
     /* 17   Additional information requested Additional information requested 9.9.3.55 O TV 2 */
     ELEM_OPT_TV(0x17, NAS_PDU_TYPE_EMM, DE_EMM_ADD_INFO_REQ, NULL);
+    /* 32    N1 UE network capability    N1 UE network capability 9.9.3.57    O    TLV    3-15 */
+    ELEM_OPT_TLV(0x32, NAS_PDU_TYPE_EMM, DE_EMM_N1_UE_NETWORK_CAP, NULL);
 
     EXTRANEOUS_DATA_CHECK(curr_len, 0, pinfo, &ei_nas_eps_extraneous_data);
 }
@@ -5104,6 +5155,8 @@ nas_emm_trac_area_upd_req(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo, g
     ELEM_OPT_TLV(0x6D, NAS_5GS_PDU_TYPE_MM, DE_NAS_5GS_MM_UE_STATUS, NULL);
     /* 17   Additional information requested Additional information requested 9.9.3.55 O TV 2 */
     ELEM_OPT_TV(0x17, NAS_PDU_TYPE_EMM, DE_EMM_ADD_INFO_REQ, NULL);
+    /* 32    N1 UE network capability    N1 UE network capability 9.9.3.57    O    TLV    3-15 */
+    ELEM_OPT_TLV(0x32, NAS_PDU_TYPE_EMM, DE_EMM_N1_UE_NETWORK_CAP, NULL);
 
     EXTRANEOUS_DATA_CHECK(curr_len, 0, pinfo, &ei_nas_eps_extraneous_data);
 }
@@ -6592,7 +6645,7 @@ proto_register_nas_eps(void)
         NULL, HFILL }
     },
     { &hf_nas_eps_spare_b7,
-        { "Spare", "nas_eps.spare.b7",
+        { "Spare bit(s)", "nas_eps.spare_bits",
         FT_UINT8, BASE_HEX, NULL, 0x80,
         NULL, HFILL }
     },
@@ -7913,11 +7966,6 @@ proto_register_nas_eps(void)
         FT_IPv6, BASE_NONE, NULL, 0x0,
         NULL, HFILL }
     },
-    { &hf_nas_eps_esm_spare_bit0x80,
-        { "Spare bit(s)", "nas_eps.spare_bits",
-        FT_UINT8, BASE_HEX, NULL, 0x80,
-        NULL, HFILL }
-    },
     { &hf_nas_eps_esm_hdr_comp_config_prof_0104,
         { "RoHC profile 0x0104 (IP)", "nas_eps.esm.hdr_comp_config.prof_0104",
         FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x40,
@@ -8019,7 +8067,7 @@ proto_register_nas_eps(void)
         NULL, HFILL }
     },
     { &hf_nas_eps_esm_spare_bits0x0100,
-        { "Spare bit", "nas_eps.spare_bits",
+        { "Spare bit(s)", "nas_eps.spare_bits",
         FT_UINT16, BASE_HEX, NULL, 0x0100,
         NULL, HFILL }
     },
@@ -8184,6 +8232,31 @@ proto_register_nas_eps(void)
         FT_UINT8, BASE_DEC, VALS(nas_eps_esm_request_type_values), 0x0,
         NULL, HFILL }
     },
+    { &hf_emm_5g_up_ciot_b3,
+        { "Control plane CIoT 5GS optimization", "nas_eps.emm.5g_up_ciot",
+        FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x08,
+        NULL, HFILL }
+    },
+    { &hf_emm_5g_hc_cp_ciot,
+        { "Header compression for control plane CIoT 5GS optimization", "nas_eps.emm.5g_hc_cp_ciot",
+        FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x04,
+        NULL, HFILL }
+    },
+    { &hf_emm_n3_data,
+        { "N3 data transfer", "nas_eps.emm.n3_data",
+        FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x02,
+        NULL, HFILL }
+    },
+    { &hf_emm_5g_cp_ciot,
+        { "User plane CIoT 5GS optimization", "nas_eps.emm.5g_cp_ciot",
+        FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x01,
+        NULL, HFILL }
+    },
+    { &hf_nas_eps_spare_b7_b4,
+        { "Spare bit(s)", "nas_eps.spare_bits",
+        FT_UINT8, BASE_HEX, NULL, 0xf0,
+        NULL, HFILL }
+    },
   };
 
     static ei_register_info ei[] = {
@@ -8266,7 +8339,7 @@ proto_register_nas_eps(void)
     register_dissector("nas-eps_plain", dissect_nas_eps_plain, proto_nas_eps);
 
     /* Register configuration options to always dissect as plain messages */
-    nas_eps_module = prefs_register_protocol(proto_nas_eps, NULL);
+    nas_eps_module = prefs_register_protocol(proto_nas_eps, proto_reg_handoff_nas_eps);
 
     prefs_register_bool_preference(nas_eps_module,
                                    "dissect_plain",
@@ -8280,11 +8353,17 @@ proto_register_nas_eps(void)
                                    "This should work when the NAS ciphering algorithm is NULL (128-EEA0)",
                                    &g_nas_eps_null_decipher);
 
-    prefs_register_bool_preference(nas_eps_module,
-                                   "user_data_container_as_ip",
-                                   "Try to decode User Data Container content as IP",
+    prefs_register_enum_preference(nas_eps_module, "decode_user_data_container_as",
+                                   "Try to decode User Data Container content as",
                                    NULL,
-                                   &g_nas_eps_user_data_container_as_ip);
+                                   &g_nas_eps_decode_user_data_container_as,
+                                   nas_eps_user_data_container_as_vals, FALSE);
+
+    prefs_register_string_preference(nas_eps_module, "non_ip_data_dissector",
+                                     "Dissector name for non IP data", NULL,
+                                     &g_nas_eps_non_ip_data_dissector);
+
+    prefs_register_obsolete_preference(nas_eps_module, "user_data_container_as_ip");
 }
 
 /* Heuristic dissector looks for "nas-eps" string at packet start  */
@@ -8323,13 +8402,22 @@ static gboolean dissect_nas_eps_heur(tvbuff_t *tvb, packet_info *pinfo,
 void
 proto_reg_handoff_nas_eps(void)
 {
-    heur_dissector_add("udp", dissect_nas_eps_heur, "NAS-EPS over UDP", "nas_eps_udp", proto_nas_eps, HEURISTIC_DISABLE);
+    static gint initialized = FALSE;
 
-    gsm_a_dtap_handle = find_dissector_add_dependency("gsm_a_dtap", proto_nas_eps);
-    lpp_handle = find_dissector_add_dependency("lpp", proto_nas_eps);
-    nbifom_handle = find_dissector_add_dependency("nbifom", proto_nas_eps);
-    ipv4_handle = find_dissector_add_dependency("ip", proto_nas_eps);
-    ipv6_handle = find_dissector_add_dependency("ipv6", proto_nas_eps);
+    if (!initialized) {
+        heur_dissector_add("udp", dissect_nas_eps_heur, "NAS-EPS over UDP", "nas_eps_udp", proto_nas_eps, HEURISTIC_DISABLE);
+        gsm_a_dtap_handle = find_dissector_add_dependency("gsm_a_dtap", proto_nas_eps);
+        lpp_handle = find_dissector_add_dependency("lpp", proto_nas_eps);
+        nbifom_handle = find_dissector_add_dependency("nbifom", proto_nas_eps);
+        ipv4_handle = find_dissector_add_dependency("ip", proto_nas_eps);
+        ipv6_handle = find_dissector_add_dependency("ipv6", proto_nas_eps);
+        initialized = TRUE;
+    }
+    if (g_nas_eps_non_ip_data_dissector[0] != '\0') {
+        non_ip_data_handle = find_dissector(g_nas_eps_non_ip_data_dissector);
+    } else {
+        non_ip_data_handle = NULL;
+    }
 }
 
 /*

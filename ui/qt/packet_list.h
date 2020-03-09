@@ -28,11 +28,26 @@ class OverlayScrollBar;
 class QAction;
 class QTimerEvent;
 
+//
+// XXX - Wireshark supports up to 2^32-1 packets in a capture, but
+// row numbers in a QAbstractItemModel are ints, not unsigned ints,
+// so we can only have 2^31-1 rows on ILP32, LP64, and LLP64 platforms.
+// Does that mean we're permanently stuck at a maximum of 2^31-1 packets
+// per capture?
+//
 class PacketList : public QTreeView
 {
     Q_OBJECT
 public:
     explicit PacketList(QWidget *parent = 0);
+
+    enum SummaryCopyType {
+        CopyAsText,
+        CopyAsCSV,
+        CopyAsYAML
+    };
+    Q_ENUM(SummaryCopyType)
+
     QMenu *conversationMenu() { return &conv_menu_; }
     QMenu *colorizeMenu() { return &colorize_menu_; }
     void setProtoTree(ProtoTree *proto_tree);
@@ -69,30 +84,37 @@ public:
 
     frame_data * getFDataForRow(int row) const;
 
+    bool multiSelectActive();
+    QList<int> selectedRows(bool useFrameNum = false);
+
+    QString createSummaryText(QModelIndex idx, SummaryCopyType type);
+    QString createHeaderSummaryText(SummaryCopyType type);
+
 protected:
-    void selectionChanged(const QItemSelection & selected, const QItemSelection & deselected);
-    void contextMenuEvent(QContextMenuEvent *event);
-    void timerEvent(QTimerEvent *event);
-    void paintEvent(QPaintEvent *event);
-    virtual void mousePressEvent (QMouseEvent *event);
-    virtual void mouseReleaseEvent (QMouseEvent *event);
-    virtual void mouseMoveEvent (QMouseEvent *event);
-    virtual void resizeEvent(QResizeEvent *event);
+
+    void selectionChanged(const QItemSelection & selected, const QItemSelection & deselected) override;
+    virtual void contextMenuEvent(QContextMenuEvent *event) override;
+    void timerEvent(QTimerEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
+    virtual void mousePressEvent (QMouseEvent *event) override;
+    virtual void mouseReleaseEvent (QMouseEvent *event) override;
+    virtual void mouseMoveEvent (QMouseEvent *event) override;
+    virtual void resizeEvent(QResizeEvent *event) override;
+    virtual void keyPressEvent(QKeyEvent *event) override;
 
 protected slots:
-    void rowsInserted(const QModelIndex &parent, int start, int end);
-    void drawRow(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const;
+    void rowsInserted(const QModelIndex &parent, int start, int end) override;
+    virtual void drawRow(QPainter *painter, const QStyleOptionViewItem &option,
+        const QModelIndex &index) const override;
 
 private:
     PacketListModel *packet_list_model_;
     PacketListHeader * packet_list_header_;
     ProtoTree *proto_tree_;
     capture_file *cap_file_;
-    QMenu ctx_menu_;
     QMenu conv_menu_;
     QMenu colorize_menu_;
     ProtocolPreferencesMenu proto_prefs_menu_;
-    QAction *decode_as_;
     int ctx_column_;
     QByteArray column_state_;
     OverlayScrollBar *overlay_sb_;
@@ -119,12 +141,13 @@ private:
 
     void setFrameReftime(gboolean set, frame_data *fdata);
     void setColumnVisibility();
-    int sizeHintForColumn(int column) const;
+    int sizeHintForColumn(int column) const override;
     void setRecentColumnWidth(int column);
     void drawCurrentPacket();
     void applyRecentColumnWidths();
     void scrollViewChanged(bool at_end);
     void colorsChanged();
+    QString joinSummaryRow(QStringList col_parts, int row, SummaryCopyType type);
 
 signals:
     void packetDissectionChanged();
@@ -134,7 +157,7 @@ signals:
     void showProtocolPreferences(const QString module_name);
     void editProtocolPreference(struct preference *pref, struct pref_module *module);
 
-    void frameSelected(int frameNum);
+    void framesSelected(QList<int>);
     void fieldSelected(FieldInformation *);
 
 public slots:
@@ -171,6 +194,7 @@ private slots:
     void drawFarOverlay();
     void drawNearOverlay();
     void updatePackets(bool redraw);
+    void ctxDecodeAsDialog();
 };
 
 #endif // PACKET_LIST_H

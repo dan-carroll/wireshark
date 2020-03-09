@@ -101,6 +101,28 @@ class case_decrypt_80211(subprocesstest.SubprocessTestCase):
         self.assertTrue(self.grepOutput('Who has 192.168.5.2'))
         self.assertTrue(self.grepOutput('DHCP ACK'))
 
+    def test_80211_wpa3_suite_b_192(self, cmd_tshark, capture_file):
+        '''IEEE 802.11 decode WPA3 Suite B 192-bit'''
+        # Included in git sources test/captures/wpa3-suiteb-192.pcapng.gz
+        self.assertRun((cmd_tshark,
+                '-o', 'wlan.enable_decryption: TRUE',
+                '-r', capture_file('wpa3-suiteb-192.pcapng.gz'),
+                '-Tfields',
+                '-e' 'wlan.rsn.ie.gtk.key',
+                '-e' 'wlan.analysis.kck',
+                '-e' 'wlan.analysis.kek',
+                ))
+        # Verify that correct PTKs (KCK, KEK) are derived and GTK correctly dissected
+        self.assertEqual(self.countOutput('^29f92526ccda5a5dfa0ffa44c26f576ee2d45bae7c5f63369103b1edcab206ea\t' \
+                                          'f49ac1a15121f1a597a60a469870450a588ef1f73a1017b1\t' \
+                                          '0289b022b4f54262048d3493834ae591e811870c4520ee1395dd215a6092fbfb$'), 1)
+        self.assertEqual(self.countOutput('^29f92526ccda5a5dfa0ffa44c26f576ee2d45bae7c5f63369103b1edcab206ea\t' \
+                                          '1027c8d5b155ff574158bc50083e28f02e9636a2ac694901\t' \
+                                          'd4814a364419fa881a8593083f51497fe9e30556a91cc5d0b11cd2b3226038e1$'), 1)
+        self.assertEqual(self.countOutput('^29f92526ccda5a5dfa0ffa44c26f576ee2d45bae7c5f63369103b1edcab206ea\t' \
+                                          '35db5e208c9caff2a4e00a54c5346085abaa6f422ef6df81\t' \
+                                          'a14d0d683c01bc631bf142e82dc4995d87364eeacfab75d74cf470683bd10c51$'), 1)
+
     def test_80211_wpa1_gtk_rekey(self, cmd_tshark, capture_file):
         '''Decode WPA1 with multiple GTK rekeys'''
         # Included in git sources test/captures/wpa1-gtk-rekey.pcapng.gz
@@ -111,6 +133,31 @@ class case_decrypt_80211(subprocesstest.SubprocessTestCase):
                 ))
         self.assertTrue(self.grepOutput('DHCP Discover'))
         self.assertEqual(self.countOutput('ICMP.*Echo .ping'), 8)
+
+    def test_80211_wpa_extended_key_id_rekey(self, cmd_tshark, capture_file):
+        '''WPA decode for Extended Key ID'''
+        # Included in git sources test/captures/wpa_ptk_extended_key_id.pcap.gz
+        self.assertRun((cmd_tshark,
+                '-o', 'wlan.enable_decryption: TRUE',
+                '-r', capture_file('wpa_ptk_extended_key_id.pcap.gz'),
+                '-Tfields',
+                '-e' 'wlan.fc.type_subtype',
+                '-e' 'wlan.ra',
+                '-e' 'wlan.analysis.tk',
+                '-e' 'wlan.analysis.gtk',
+                '-e' 'wlan.rsn.ie.ptk.keyid',
+                ))
+        # Verify frames are decoded with the correct key
+        self.assertEqual(self.countOutput('^32\t33:33:00:00:00:16\t\t234a9a6ddcca3cb728751cea49d01bb0\t$'), 5)
+        self.assertEqual(self.countOutput('^32\t33:33:ff:00:00:00\t\t234a9a6ddcca3cb728751cea49d01bb0\t$'), 1)
+        self.assertEqual(self.countOutput('^32\t33:33:ff:00:03:00\t\t234a9a6ddcca3cb728751cea49d01bb0\t$'), 1)
+        self.assertEqual(self.countOutput('^32\tff:ff:ff:ff:ff:ff\t\t234a9a6ddcca3cb728751cea49d01bb0\t$'), 4)
+        self.assertEqual(self.countOutput('^40\t02:00:00:00:03:00\t618b4d1829e2a496d7fd8c034a6d024d\t\t$'), 2)
+        self.assertEqual(self.countOutput('^40\t02:00:00:00:00:00\t618b4d1829e2a496d7fd8c034a6d024d\t\t$'), 1)
+        # Verify RSN PTK KeyID parsing
+        self.assertEqual(self.countOutput('^40\t02:00:00:00:00:00\t\t\t1$'), 1)
+        self.assertEqual(self.countOutput('^40\t02:00:00:00:00:00\tf31ecff5452f4c286cf66ef50d10dabe\t\t0$'), 1)
+        self.assertEqual(self.countOutput('^40\t02:00:00:00:00:00\t28dd851decf3f1c2a35df8bcc22fa1d2\t\t1$'), 1)
 
 @fixtures.mark_usefixtures('test_env')
 @fixtures.uses_fixtures
@@ -585,8 +632,8 @@ class case_decrypt_kerberos(subprocesstest.SubprocessTestCase):
 
 @fixtures.fixture(scope='session')
 def run_wireguard_test(cmd_tshark, capture_file, features):
-    if not features.have_libgcrypt17:
-        fixtures.skip('Requires Gcrypt 1.7 or later')
+    if not features.have_libgcrypt18:
+        fixtures.skip('Requires Gcrypt 1.8 or later')
     def runOne(self, args, keylog=None, pcap_file='wireguard-ping-tcp.pcap'):
         if keylog:
             keylog_file = self.filename_from_id('wireguard.keys')
@@ -1059,65 +1106,182 @@ class case_decrypt_pkcs11(subprocesstest.SubprocessTestCase):
 @fixtures.mark_usefixtures('test_env')
 @fixtures.uses_fixtures
 class case_decrypt_smb2(subprocesstest.SubprocessTestCase):
-    def test_smb300_bad_key(self, cmd_tshark, capture_file):
+    BAD_KEY = 'ffffffffffffffffffffffffffffffff'
+
+    def check_bad_key(self, cmd_tshark, cap, disp_filter, sesid, seskey, s2ckey, c2skey):
+        proc = self.assertRun((cmd_tshark,
+                '-r', cap,
+                '-o', 'uat:smb2_seskey_list:{},{},{},{}'.format(sesid, seskey, s2ckey, c2skey),
+                '-Y', disp_filter,
+        ))
+        self.assertIn('Encrypted SMB', proc.stdout_str)
+
+    #
+    # SMB3.0 CCM bad keys tests
+    #
+    def test_smb300_bad_seskey(self, features, cmd_tshark, capture_file):
         '''Check that a bad session key doesn't crash'''
-        seskey = 'ffffffffffffffffffffffffffffffff'
-        sesid = '1900009c003c0000'
-        proc = self.assertRun((cmd_tshark,
-                '-r', capture_file('smb300-aes-128-ccm.pcap.gz'),
-                '-o', 'uat:smb2_seskey_list:{},{}'.format(sesid, seskey),
-                '-Y', 'frame.number == 7',
-        ))
-        self.assertIn('Invalid header', proc.stdout_str)
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb300-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '1900009c003c0000', self.BAD_KEY, '""', '""')
 
-    def test_smb311_bad_key(self, cmd_tshark, capture_file):
-        seskey = 'ffffffffffffffffffffffffffffffff'
-        sesid = '2900009c003c0000'
-        proc = self.assertRun((cmd_tshark,
-                '-r', capture_file('smb311-aes-128-ccm.pcap.gz'),
-                '-o', 'uat:smb2_seskey_list:{},{}'.format(sesid, seskey),
-                '-Y', 'frame.number == 7'
-        ))
-        self.assertIn('Invalid header', proc.stdout_str)
+    def test_smb300_bad_s2ckey(self, features, cmd_tshark, capture_file):
+        '''Check that a bad s2c key doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb300-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '1900009c003c0000', '""', self.BAD_KEY, '""')
 
-    def test_smb300_aes128ccm(self, cmd_tshark, capture_file):
-        '''Check SMB 3.0 AES128CCM decryption.'''
-        sesid = '1900009c003c0000'
-        seskey = '9a9ea16a0cdbeb6064772318073f172f'
-        tree = r'\\dfsroot1.foo.test\IPC$'
+    def test_smb300_bad_c2skey(self, features, cmd_tshark, capture_file):
+        '''Check that a bad c2s key doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb300-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '1900009c003c0000', '""', '""', self.BAD_KEY)
+
+    def test_smb300_bad_deckey(self, features, cmd_tshark, capture_file):
+        '''Check that bad decryption keys doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb300-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '1900009c003c0000', '""', self.BAD_KEY, self.BAD_KEY)
+
+    def test_smb300_bad_allkey(self, features, cmd_tshark, capture_file):
+        '''Check that all bad keys doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb300-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '1900009c003c0000', self.BAD_KEY, self.BAD_KEY, self.BAD_KEY)
+
+    #
+    # SMB3.1.1 CCM bad key tests
+    #
+    def test_smb311_bad_seskey(self, features, cmd_tshark, capture_file):
+        '''Check that a bad session key doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb311-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '2900009c003c0000', self.BAD_KEY, '""', '""')
+
+    def test_smb311_bad_s2ckey(self, features, cmd_tshark, capture_file):
+        '''Check that a bad s2c key doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb311-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '2900009c003c0000', '""', self.BAD_KEY, '""')
+
+    def test_smb311_bad_c2skey(self, features, cmd_tshark, capture_file):
+        '''Check that a bad c2s key doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb311-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '2900009c003c0000', '""', '""', self.BAD_KEY)
+
+    def test_smb311_bad_deckey(self, features, cmd_tshark, capture_file):
+        '''Check that bad decryption keys doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb311-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '2900009c003c0000', '""', self.BAD_KEY, self.BAD_KEY)
+
+    def test_smb311_bad_allkey(self, features, cmd_tshark, capture_file):
+        '''Check that all bad keys doesn't crash'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_bad_key(cmd_tshark, capture_file('smb311-aes-128-ccm.pcap.gz'),
+                           'frame.number == 7', '2900009c003c0000', self.BAD_KEY, self.BAD_KEY, self.BAD_KEY)
+
+    #
+    # Decryption tests
+    #
+
+    def check_tree(self, cmd_tshark, cap, tree, sesid, seskey, s2ckey, c2skey):
         proc = self.assertRun((cmd_tshark,
-                '-r', capture_file('smb300-aes-128-ccm.pcap.gz'),
-                '-o', 'uat:smb2_seskey_list:{},{}'.format(sesid, seskey),
+                '-r', cap,
+                '-o', 'uat:smb2_seskey_list:{},{},{},{}'.format(sesid, seskey, s2ckey, c2skey),
                 '-Tfields',
                 '-e', 'smb2.tree',
                 '-Y', 'smb2.tree == "{}"'.format(tree.replace('\\', '\\\\')),
         ))
         self.assertEqual(tree, proc.stdout_str.strip())
 
-    def test_smb311_aes128ccm(self, cmd_tshark, capture_file):
-        '''Check SMB 3.1.1 AES128CCM decryption.'''
-        sesid = '2900009c003c0000'
-        seskey = 'f1fa528d3cd182cca67bd4596dabd885'
-        tree = r'\\dfsroot1.foo.test\IPC$'
-        proc = self.assertRun((cmd_tshark,
-                '-r', capture_file('smb311-aes-128-ccm.pcap.gz'),
-                '-o', 'uat:smb2_seskey_list:{},{}'.format(sesid, seskey),
-                '-Tfields',
-                '-e', 'smb2.tree',
-                '-Y', 'smb2.tree == "{}"'.format(tree.replace('\\', '\\\\')),
-        ))
-        self.assertEqual(tree, proc.stdout_str.strip())
+    # SMB3.0 CCM
+    def test_smb300_aes128ccm_seskey(self, features, cmd_tshark, capture_file):
+        '''Check SMB 3.0 AES128CCM decryption with session key.'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_tree(cmd_tshark, capture_file('smb300-aes-128-ccm.pcap.gz'),
+                        r'\\dfsroot1.foo.test\IPC$', '1900009c003c0000',
+                        '9a9ea16a0cdbeb6064772318073f172f', '""', '""')
 
-    def test_smb311_aes128gcm(self, cmd_tshark, capture_file):
-        '''Check SMB 3.1.1 AES128GCM decryption.'''
-        sesid = '3900000000400000'
-        seskey = 'e79161ded03bda1449b2c8e58f753953'
-        tree = r'\\dfsroot1.foo.test\IPC$'
-        proc = self.assertRun((cmd_tshark,
-                '-r', capture_file('smb311-aes-128-gcm.pcap.gz'),
-                '-o', 'uat:smb2_seskey_list:{},{}'.format(sesid, seskey),
-                '-Tfields',
-                '-e', 'smb2.tree',
-                '-Y', 'smb2.tree == "{}"'.format(tree.replace('\\', '\\\\')),
+    def test_smb300_aes128ccm_deckey(self, features, cmd_tshark, capture_file):
+        '''Check SMB 3.0 AES128CCM decryption with decryption keys.'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_tree(cmd_tshark, capture_file('smb300-aes-128-ccm.pcap.gz'),
+                        r'\\dfsroot1.foo.test\IPC$', '1900009c003c0000',
+                        '""', '8be6cc53d4beba29387e69aef035d497','bff985870e81784d533fdc09497b8eab')
+
+
+    # SMB3.1.1 CCM
+    def test_smb311_aes128ccm_seskey(self, features, cmd_tshark, capture_file):
+        '''Check SMB 3.1.1 AES128CCM decryption with session key.'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_tree(cmd_tshark, capture_file('smb311-aes-128-ccm.pcap.gz'),
+                        r'\\dfsroot1.foo.test\IPC$', '2900009c003c0000',
+                        'f1fa528d3cd182cca67bd4596dabd885', '""', '""')
+
+    def test_smb311_aes128ccm_deckey(self, features, cmd_tshark, capture_file):
+        '''Check SMB 3.1.1 AES128CCM decryption with decryption keys.'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_tree(cmd_tshark, capture_file('smb311-aes-128-ccm.pcap.gz'),
+                        r'\\dfsroot1.foo.test\IPC$', '2900009c003c0000',
+                        '""', '763d5552dbc9650b700869467a5857e4', '35e69833c6578e438c8701cb40bf483e')
+
+    # SMB3.1.1 GCM
+    def test_smb311_aes128gcm_seskey(self, features, cmd_tshark, capture_file):
+        '''Check SMB 3.1.1 AES128GCM decryption with session key.'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_tree(cmd_tshark, capture_file('smb311-aes-128-gcm.pcap.gz'),
+                        r'\\dfsroot1.foo.test\IPC$', '3900000000400000',
+                        'e79161ded03bda1449b2c8e58f753953', '""', '""')
+
+    def test_smb311_aes128gcm_deckey(self, features, cmd_tshark, capture_file):
+        '''Check SMB 3.1.1 AES128GCM decryption with decryption keys.'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_tree(cmd_tshark, capture_file('smb311-aes-128-gcm.pcap.gz'),
+                        r'\\dfsroot1.foo.test\IPC$', '3900000000400000',
+                        '""', 'b02f5de25e0562075c3dc329fa2aa396', '7201623a31754e6581864581209dd3d2')
+
+    def check_partial(self, home_path, cmd_tshark, full_cap, pkt_skip, tree, sesid, s2ckey, c2skey):
+        # generate a trace without NegProt and SessionSetup
+        partial_cap = os.path.join(home_path, 'short.pcap')
+        self.assertRun((cmd_tshark,
+                        '-r', full_cap,
+                        '-Y', 'frame.number >= %d'%pkt_skip,
+                        '-w', partial_cap,
         ))
-        self.assertEqual(tree, proc.stdout_str.strip())
+        self.check_tree(cmd_tshark, partial_cap, tree, sesid, '""', s2ckey, c2skey)
+
+    def test_smb311_aes128gcm_partial(self, features, home_path, cmd_tshark, capture_file):
+        '''Check SMB 3.1.1 AES128GCM decryption in capture missing session setup'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_partial(home_path, cmd_tshark,
+                           capture_file('smb311-aes-128-gcm.pcap.gz'), 7,
+                           r'\\dfsroot1.foo.test\IPC$', '3900000000400000',
+                           'b02f5de25e0562075c3dc329fa2aa396', '7201623a31754e6581864581209dd3d2')
+
+    def test_smb311_aes128gcm_partial_keyswap(self, features, home_path, cmd_tshark, capture_file):
+        '''Check SMB 3.1.1 AES128GCM decryption in capture missing session setup with keys in wrong order'''
+        if not features.have_libgcrypt16:
+            self.skipTest('Requires GCrypt 1.6 or later.')
+        self.check_partial(home_path, cmd_tshark,
+                           capture_file('smb311-aes-128-gcm.pcap.gz'), 7,
+                           r'\\dfsroot1.foo.test\IPC$', '3900000000400000',
+                           '7201623a31754e6581864581209dd3d2', 'b02f5de25e0562075c3dc329fa2aa396')

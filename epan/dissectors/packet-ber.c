@@ -1829,7 +1829,7 @@ dissect_ber_null(gboolean implicit_tag, asn1_ctx_t *actx, proto_tree *tree, tvbu
         offset = dissect_ber_identifier(actx->pinfo, tree, tvb, offset, &ber_class, &pc, &tag);
         identifier_len = offset - identifier_offset;
         if (pc ||
-            (!implicit_tag && ((ber_class != BER_CLASS_UNI) || (tag != BER_UNI_TAG_NULL)))) {
+            ((ber_class != BER_CLASS_UNI) || (tag != BER_UNI_TAG_NULL))) {
             proto_tree_add_expert_format(
                 tree, actx->pinfo, &ei_ber_expected_null,
                 tvb, identifier_offset, identifier_len,
@@ -1973,6 +1973,16 @@ proto_tree_add_debug_text(tree, "INTEGERnew dissect_ber_integer(%s) entered impl
                 break;
             case FT_UINT64:
                 actx->created_item = proto_tree_add_uint64(tree, hf_id, tvb, offset-len, len, (guint64)val);
+                break;
+            case FT_BYTES:
+                /*
+                 * Some protocols have INTEGER fields that can store values
+                 * larger than 64 bits and therefore have to use FT_BYTES.
+                 * Values larger than 64 bits are handled above while smaller
+                 * values are handled here.
+                 */
+                actx->created_item = proto_tree_add_bytes_format(tree, hf_id, tvb, offset-len, len, NULL,
+                        "%s: 0x%s", hfi->name, tvb_bytes_to_str(wmem_packet_scope(), tvb, offset-len, len));
                 break;
             default:
                 DISSECTOR_ASSERT_NOT_REACHED();
@@ -2195,7 +2205,7 @@ proto_tree_add_debug_text(tree, "SEQUENCE dissect_ber_sequence(%s) entered\n", n
         /* sanity check: we only handle Constructed Universal Sequences */
         if ((classx != BER_CLASS_APP) && (classx != BER_CLASS_PRI)) {
             if (!pcx
-             || (!implicit_tag && ((classx != BER_CLASS_UNI) || (tagx != BER_UNI_TAG_SEQUENCE)))) {
+             || ((classx != BER_CLASS_UNI) || (tagx != BER_UNI_TAG_SEQUENCE))) {
                 tvb_ensure_bytes_exist(tvb, hoffset, 2);
                 cause = proto_tree_add_expert_format(
                     tree, actx->pinfo, &ei_ber_expected_sequence,
@@ -2555,8 +2565,7 @@ proto_tree_add_debug_text(tree, "SET dissect_ber_set(%s) entered\n", name);
         /* sanity check: we only handle Constructed Universal Sets */
         if ((classx != BER_CLASS_APP) && (classx != BER_CLASS_PRI)) {
             if (!pcx
-             || (!implicit_tag && ((classx != BER_CLASS_UNI)
-                                || (tagx != BER_UNI_TAG_SET)))) {
+             || ((classx != BER_CLASS_UNI) || (tagx != BER_UNI_TAG_SET))) {
                 tvb_ensure_bytes_exist(tvb, hoffset, 2);
                 cause = proto_tree_add_expert_format(
                     tree, actx->pinfo, &ei_ber_expected_set,
@@ -3365,8 +3374,7 @@ proto_tree_add_debug_text(tree, "SQ OF dissect_ber_sq_of(%s) entered\n", name);
         /* sanity check: we only handle Constructed Universal Sequences */
         if ((classx != BER_CLASS_APP) && (classx != BER_CLASS_PRI)) {
             if (!pcx
-             || (!implicit_tag && ((classx != BER_CLASS_UNI)
-                                || (tagx != type)))) {
+             || ((classx != BER_CLASS_UNI) || (tagx != type))) {
                 tvb_ensure_bytes_exist(tvb, hoffsetx, 2);
                 causex = proto_tree_add_expert_format(
                     tree, actx->pinfo,
@@ -3625,8 +3633,7 @@ dissect_ber_GeneralizedTime(gboolean implicit_tag, asn1_ctx_t *actx, proto_tree 
         end_offset = offset+len;
 
         /* sanity check. we only handle universal/generalized time */
-        if ( (ber_class != BER_CLASS_UNI)
-          || (tag != BER_UNI_TAG_GeneralizedTime)) {
+        if ( (ber_class != BER_CLASS_UNI) || (tag != BER_UNI_TAG_GeneralizedTime)) {
             tvb_ensure_bytes_exist(tvb, hoffset, 2);
             cause = proto_tree_add_expert_format(
                 tree, actx->pinfo, &ei_ber_expected_generalized_time,
@@ -3780,12 +3787,13 @@ invalid:
     return end_offset;
 }
 
-
+/* datestrptr: if not NULL return datetime string instead of adding to tree or NULL when packet is malformed
+ * tvblen: if not NULL return consumed packet bytes
+ */
 int
-dissect_ber_UTCTime(gboolean implicit_tag, asn1_ctx_t *actx, proto_tree *tree, tvbuff_t *tvb, int offset, gint hf_id)
+dissect_ber_UTCTime(gboolean implicit_tag, asn1_ctx_t *actx, proto_tree *tree, tvbuff_t *tvb, int offset, gint hf_id, char **datestrptr, guint32 *tvblen)
 {
-    char          outstr[33];
-    char         *outstrptr = outstr;
+    char         *outstr, *outstrptr;
     const guint8 *instr;
     gint8         ber_class;
     gboolean      pc;
@@ -3797,6 +3805,11 @@ dissect_ber_UTCTime(gboolean implicit_tag, asn1_ctx_t *actx, proto_tree *tree, t
     proto_item   *cause;
     proto_tree   *error_tree;
     const gchar  *error_str = NULL;
+
+    outstrptr = outstr = (char *)wmem_alloc(wmem_packet_scope(), 29);
+
+    if (datestrptr) *datestrptr = NULL; /* mark invalid */
+    if (tvblen) *tvblen = 0;
 
     if (!implicit_tag) {
         hoffset = offset;
@@ -3908,9 +3921,14 @@ dissect_ber_UTCTime(gboolean implicit_tag, asn1_ctx_t *actx, proto_tree *tree, t
         goto malformed;
     }
 
-    if (hf_id >= 0) {
-        proto_tree_add_string(tree, hf_id, tvb, offset, len, outstr);
+    if (datestrptr) {
+       *datestrptr = outstr; /* mark as valid */
+    } else {
+        if (hf_id >= 0) {
+            proto_tree_add_string(tree, hf_id, tvb, offset, len, outstr);
+        }
     }
+    if (tvblen) *tvblen = len;
 
     return offset+len;
 malformed:
@@ -3927,9 +3945,10 @@ malformed:
         "%s",
         error_str);
 
+    if (tvblen) *tvblen = len;
+
     return offset+len;
 }
-
 
 /* 8.6 Encoding of a bitstring value */
 
@@ -3968,7 +3987,7 @@ dissect_ber_constrained_bitstring(gboolean implicit_tag, asn1_ctx_t *actx, proto
            So here we relax it for APPLICATION tags. CONTEXT tags may
            still cause a problem. */
 
-        if (!implicit_tag && (ber_class != BER_CLASS_APP)) {
+        if (ber_class != BER_CLASS_APP) {
             if ((ber_class != BER_CLASS_UNI)
                 || (tag != BER_UNI_TAG_BITSTRING)) {
                 tvb_ensure_bytes_exist(tvb, hoffset, 2);
@@ -4035,6 +4054,7 @@ dissect_ber_constrained_bitstring(gboolean implicit_tag, asn1_ctx_t *actx, proto
             item = proto_tree_add_item(parent_tree, hf_id, tvb, offset, len, ENC_NA);
             actx->created_item = item;
             if (named_bits) {
+                guint8 *bitstring = (guint8 *)tvb_memdup(wmem_packet_scope(), tvb, offset, len);
                 const int named_bits_bytelen = (num_named_bits + 7) / 8;
                 if (show_internal_ber_fields) {
                     guint zero_bits_omitted = 0;
@@ -4047,13 +4067,6 @@ dissect_ber_constrained_bitstring(gboolean implicit_tag, asn1_ctx_t *actx, proto
                     tree = proto_item_add_subtree(item, ett_id);
                 }
                 for (int i = 0; i < named_bits_bytelen; i++) {
-                    // If less data is available than the number of named bits, then
-                    // the trailing (right) bits are assumed to be 0.
-                    guint64 value = 0;
-                    if (i < len) {
-                        value = tvb_get_guint8(tvb, offset + i);
-                    }
-
                     // Process 8 bits at a time instead of 64, each field masks a
                     // single byte.
                     const int bit_offset = 8 * i;
@@ -4065,6 +4078,18 @@ dissect_ber_constrained_bitstring(gboolean implicit_tag, asn1_ctx_t *actx, proto
                         section_named_bits = (const int** )flags;
                     }
 
+                    // If less data is available than the number of named bits, then
+                    // the trailing (right) bits are assumed to be 0.
+                    guint64 value = 0;
+                    if (i < len) {
+                        value = bitstring[i];
+                        if (num_named_bits - bit_offset > 7) {
+                            bitstring[i] = 0;
+                        } else {
+                            bitstring[i] &= 0xff >> (num_named_bits - bit_offset);
+                        }
+                    }
+
                     // TODO should non-zero pad bits be masked from the value?
                     // When trailing zeroes are not present in the data, mark the
                     // last byte for the lack of a better alternative.
@@ -4072,9 +4097,12 @@ dissect_ber_constrained_bitstring(gboolean implicit_tag, asn1_ctx_t *actx, proto
                 }
                 // If more data is available than the number of named bits, then
                 // either the spec was updated or the packet is malformed.
-                if (named_bits_bytelen < len) {
-                    expert_add_info_format(actx->pinfo, item, &ei_ber_bits_unknown, "Unknown bit(s): 0x%s",
-                        tvb_bytes_to_str(wmem_packet_scope(), tvb, offset + named_bits_bytelen, len - named_bits_bytelen));
+                for (int i = 0; i < len; i++) {
+                    if (bitstring[i]) {
+                        expert_add_info_format(actx->pinfo, item, &ei_ber_bits_unknown, "Unknown bit(s): 0x%s",
+                             bytes_to_str(wmem_packet_scope(), bitstring, len));
+                        break;
+                    }
                 }
             }
         }

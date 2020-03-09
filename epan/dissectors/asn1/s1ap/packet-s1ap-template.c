@@ -10,7 +10,7 @@
  *
  * Based on the RANAP dissector
  *
- * References: 3GPP TS 36.413 V15.6.0 (2019-06)
+ * References: 3GPP TS 36.413 V15.8.0 (2019-12)
  */
 
 #include "config.h"
@@ -187,6 +187,7 @@ struct s1ap_private_data {
   const char *obj_id;
   struct s1ap_tai *tai;
   guint16 enb_ue_s1ap_id;
+  gboolean srvcc_ho_cs_only;
 };
 
 enum {

@@ -8,10 +8,13 @@
 #
 
 if(WIN32)
-	# Needed for GREATER_EQUAL operator
-	cmake_minimum_required(VERSION 3.7)
+	# Needed for add_custom_command() WORKING_DIRECTORY generator expressions
+	cmake_minimum_required(VERSION 3.13)
 else()
 	cmake_minimum_required(VERSION 3.5)
+endif()
+if(POLICY CMP0074)
+	cmake_policy(SET CMP0074 NEW)
 endif()
 if(POLICY CMP0083)
 	cmake_policy(SET CMP0083 NEW)
@@ -28,8 +31,8 @@ project(${_project_name} C CXX)
 # Updated by tools/make-version.pl
 set(GIT_REVISION 0)
 set(PROJECT_MAJOR_VERSION 3)
-set(PROJECT_MINOR_VERSION 1)
-set(PROJECT_PATCH_VERSION 1)
+set(PROJECT_MINOR_VERSION 3)
+set(PROJECT_PATCH_VERSION 0)
 set(PROJECT_BUILD_VERSION ${GIT_REVISION})
 set(PROJECT_VERSION_EXTENSION "")
 
@@ -40,6 +43,8 @@ endif()
 set(PROJECT_VERSION "${PROJECT_MAJOR_VERSION}.${PROJECT_MINOR_VERSION}.${PROJECT_PATCH_VERSION}${PROJECT_VERSION_EXTENSION}")
 
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+
+include( CMakeOptions.txt )
 
 # We require minimum C++11
 set(CMAKE_CXX_STANDARD 11)
@@ -123,13 +128,6 @@ if(WIN32)
 	# on Windows can be slow.
 	set(HAVE_FCNTL_H TRUE)
 	set(HAVE_FLOORL TRUE)
-	set(HAVE_LRINT TRUE)
-
-	# It looks like we call check_type_size somewhere, which checks
-	# for these.
-	set(HAVE_SYS_TYPES_H TRUE)
-	set(HAVE_STDINT_H TRUE)
-	set(HAVE_STDDEF_H TRUE)
 endif(WIN32)
 
 include(UseCustomIncludes)
@@ -199,11 +197,8 @@ if(NOT (WIN32 OR APPLE OR USE_STATIC))
 		# binaries. In other cases, only absolute paths can be used.
 		# https://www.lekensteyn.nl/rpath.html
 		if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|SunOS|FreeBSD)$")
-			# Provide a knob to optionally force absolute rpaths,
-			# to support old/buggy systems and as a user preference
-			# for hardening.
 			set(_enable_rpath_origin TRUE)
-			if(BUILD_dumpcap AND PCAP_FOUND)
+			if(BUILD_dumpcap AND ENABLE_PCAP)
 				# dumpcap will most likely be installed with
 				# capabilities or setuid. Relative RPATHs that
 				# resolve to non-standard library directories
@@ -212,6 +207,9 @@ if(NOT (WIN32 OR APPLE OR USE_STATIC))
 				# disable it by default.
 				set(_enable_rpath_origin FALSE)
 			endif()
+			# Provide a knob to optionally force absolute rpaths,
+			# to support old/buggy systems and as a user preference
+			# for hardening.
 			set(ENABLE_RPATH_ORIGIN ${_enable_rpath_origin} CACHE BOOL
 				"Use $ORIGIN with INSTALL_RPATH")
 			mark_as_advanced(ENABLE_RPATH_ORIGIN)
@@ -310,7 +308,6 @@ include_directories(
 	${CMAKE_SOURCE_DIR}
 )
 
-include( CMakeOptions.txt )
 if( DUMPCAP_INSTALL_OPTION STREQUAL "suid" )
 	set( DUMPCAP_SETUID "SETUID" )
 else()
@@ -426,10 +423,11 @@ if( CMAKE_C_COMPILER_ID MATCHES "MSVC")
 	# Additional compiler warnings to be treated as "Level 3"
 	# when compiling Wireshark sources. (Selected from "level 4" warnings).
 	## 4295: array is too small to include a terminating null character
+	## 4100: unreferenced formal parameter
 	## 4189: local variable is initialized but not referenced
 	# Disable warnings about about use of flexible array members:
 	## 4200: nonstandard extension used : zero-sized array in struct/union
-	list(APPEND LOCAL_CFLAGS /w34295 /w34189 /wd4200)
+	list(APPEND LOCAL_CFLAGS /w34295 /w34100 /w34189 /wd4200)
 
 	# We've matched these to specific compiler versions using the
 	# checks above. There's no need to pass them to check_c_compiler_flag
@@ -947,14 +945,14 @@ if(NOT CMAKE_C_COMPILER_ID MATCHES "MSVC" AND NOT OSS_FUZZ)
 	# independent may fail, the user can set CMAKE_EXE_LINKER_FLAGS=-no-pie
 	# as a workaround.
 	#
-	if(CMAKE_VERSION VERSION_GREATER "3.13.999")
-		include(CheckPIESupported)
-		check_pie_supported()
-	else()
+	if(CMAKE_VERSION VERSION_LESS "3.14")
 		check_c_linker_flag(-pie LINK_pie_VALID)
 		if(LINK_pie_VALID)
 			set(CMAKE_EXE_LINKER_FLAGS "-pie ${CMAKE_EXE_LINKER_FLAGS}")
 		endif()
+	else()
+		include(CheckPIESupported)
+		check_pie_supported()
 	endif()
 endif()
 
@@ -1030,6 +1028,9 @@ reset_find_package(GTHREAD2)
 find_package(GTHREAD2 REQUIRED)
 reset_find_package(GCRYPT GCRYPT_ERROR_LIBRARY)
 find_package(GCRYPT "1.4.2" REQUIRED)
+# C Asynchronous resolver
+reset_find_package(CARES)
+find_package(CARES "1.5.0" REQUIRED)
 find_package(LEX REQUIRED)
 find_package(YACC REQUIRED)
 find_package(Perl REQUIRED)
@@ -1086,11 +1087,11 @@ if(BUILD_wireshark)
 		Qt5LinguistTools
 		Qt5Multimedia
 		Qt5PrintSupport
-		Qt5Svg
 		Qt5Widgets
 	)
 	if(APPLE)
 		list(APPEND QT_PACKAGELIST Qt5MacExtras)
+		ws_find_package(Sparkle ENABLE_SPARKLE HAVE_SOFTWARE_UPDATE)
 	endif()
 	if(WIN32)
 		list(APPEND QT_PACKAGELIST Qt5WinExtras)
@@ -1120,9 +1121,6 @@ ws_find_package(GNUTLS ENABLE_GNUTLS HAVE_LIBGNUTLS "3.2.0")
 # Kerberos
 ws_find_package(KERBEROS ENABLE_KERBEROS HAVE_KERBEROS)
 
-# C Asynchronous resolver
-ws_find_package(CARES ENABLE_CARES HAVE_C_ARES "1.5.0")
-
 # Zlib compression
 ws_find_package(ZLIB ENABLE_ZLIB HAVE_ZLIB)
 
@@ -1138,6 +1136,9 @@ ws_find_package(LZ4 ENABLE_LZ4 HAVE_LZ4)
 # Snappy compression
 ws_find_package(SNAPPY ENABLE_SNAPPY HAVE_SNAPPY)
 
+# zstd compression
+ws_find_package(ZSTD ENABLE_ZSTD HAVE_ZSTD "1.0.0")
+
 # Enhanced HTTP/2 dissection
 ws_find_package(NGHTTP2 ENABLE_NGHTTP2 HAVE_NGHTTP2)
 
@@ -1151,6 +1152,8 @@ ws_find_package(SBC ENABLE_SBC HAVE_SBC)
 ws_find_package(SPANDSP ENABLE_SPANDSP HAVE_SPANDSP)
 
 ws_find_package(BCG729 ENABLE_BCG729 HAVE_BCG729)
+
+ws_find_package(ILBC ENABLE_ILBC HAVE_ILBC)
 
 # CMake 3.9 and below used 'LIBXML2_LIBRARIES' as the name of the cache entry
 # storing the find_library result. Transfer it to the new cache variable such
@@ -1170,9 +1173,9 @@ if(NOT LIBXML2_FOUND)
 	set(LIBXML2_INCLUDE_DIRS "")
 endif()
 
-# Capabilities
-ws_find_package(CAP ENABLE_CAP HAVE_LIBCAP)
-if(NOT WIN32)
+# Capabilities to run dumpcap as non-root user.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	ws_find_package(CAP ENABLE_CAP HAVE_LIBCAP)
 	find_package(SETCAP)
 endif()
 
@@ -1186,7 +1189,9 @@ else()
 endif()
 
 # Windows version updates
-ws_find_package(WINSPARKLE ENABLE_WINSPARKLE HAVE_SOFTWARE_UPDATE)
+ws_find_package(WinSparkle ENABLE_WINSPARKLE HAVE_SOFTWARE_UPDATE)
+
+find_package( Asciidoctor 1.5 )
 
 find_package(POD REQUIRED)
 
@@ -1229,8 +1234,8 @@ if(GNUTLS_FOUND AND NOT GNUTLS_VERSION VERSION_LESS "3.4.0")
 endif()
 
 if (QT_FOUND)
-	if (Qt5Widgets_VERSION VERSION_LESS 5.2)
-		message(FATAL_ERROR "Qt 5.2 or later is required.")
+	if (Qt5Widgets_VERSION VERSION_LESS 5.3)
+		message(FATAL_ERROR "Qt 5.3 or later is required.")
 	endif()
 	if (Qt5Widgets_VERSION VERSION_GREATER 5.6
 	    AND (CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang"))
@@ -1267,6 +1272,9 @@ if (QT_FOUND)
 		find_program(QT_MACDEPLOYQT_EXECUTABLE macdeployqt
 			HINTS "${QT_BIN_PATH}"
 			DOC "Path to the macdeployqt utility."
+		)
+		find_program(DMGBUILD_EXECUTABLE dmgbuild
+			DOC "Path to the dmgbuild utility"
 		)
 		# https://doc.qt.io/qt-5.11/supported-platforms-and-configurations.html
 		# CMake < 3.7 doesn't support VERSION_GREATER_EQUAL.
@@ -1460,6 +1468,11 @@ if(ENABLE_PLUGINS)
 			plugins/codecs/G729
 		)
 	endif()
+	if(ILBC_FOUND)
+		list(APPEND PLUGIN_SRC_DIRS
+			plugins/codecs/iLBC
+		)
+	endif()
 	if(SBC_FOUND)
 		list(APPEND PLUGIN_SRC_DIRS
 			plugins/codecs/sbc
@@ -1505,13 +1518,21 @@ include(gmxTestLargeFiles)
 gmx_test_large_files(GMX_LARGEFILES)
 
 set( VERSION ${PROJECT_VERSION} )
-add_custom_target(version
-	BYPRODUCTS version.h
-	COMMAND ${PERL_EXECUTABLE}
-		${CMAKE_SOURCE_DIR}/tools/make-version.pl
-		${CMAKE_SOURCE_DIR}
-)
-set_target_properties(version PROPERTIES FOLDER "Auxiliary")
+if(VCSVERSION_OVERRIDE)
+	# Allow distributors to override detection of the Git tag and version.
+	string(CONFIGURE "#define VCSVERSION \"@VCSVERSION_OVERRIDE@\"\n"
+		_version_h_contents ESCAPE_QUOTES)
+	file(WRITE "${CMAKE_BINARY_DIR}/version.h" "${_version_h_contents}")
+	message(STATUS "VCSVERSION_OVERRIDE: ${VCSVERSION_OVERRIDE}")
+else()
+	add_custom_target(version
+		BYPRODUCTS version.h
+		COMMAND ${PERL_EXECUTABLE}
+			${CMAKE_SOURCE_DIR}/tools/make-version.pl
+			${CMAKE_SOURCE_DIR}
+	)
+	set_target_properties(version PROPERTIES FOLDER "Auxiliary")
+endif()
 
 set( configure_input "Built with CMake ${CMAKE_VERSION}" )
 configure_file(${CMAKE_SOURCE_DIR}/cmakeconfig.h.in ${CMAKE_BINARY_DIR}/config.h)
@@ -1539,10 +1560,9 @@ set(CFG_OUT_FILES
 	image/wiretap.rc
 	image/wireshark.exe.manifest
 	packaging/macosx/Info.plist
+	packaging/macosx/dmgbuild-settings.py
 	packaging/macosx/osx-app.sh
 	packaging/macosx/osx-dmg.sh
-	packaging/macosx/Read_me_first.rtf
-	packaging/macosx/Wireshark_package.pmdoc/index.xml
 	packaging/source/git-export-release.sh
 	wireshark.pc
 )
@@ -1551,6 +1571,11 @@ foreach( _cfg_file ${CFG_OUT_FILES} )
 endforeach()
 
 include(FeatureSummary)
+set_package_properties(CAP PROPERTIES
+	DESCRIPTION "The Libcap package implements the user-space interfaces to the POSIX 1003.1e capabilities available in Linux kernels"
+	URL "https://sites.google.com/site/fullycapable/"
+	PURPOSE "Allow packet captures without running as root"
+)
 set_package_properties(SBC PROPERTIES
 	DESCRIPTION "Bluetooth low-complexity, subband codec (SBC) decoder"
 	URL "https://git.kernel.org/pub/scm/bluetooth/sbc.git"
@@ -1565,6 +1590,11 @@ set_package_properties(BCG729 PROPERTIES
 	DESCRIPTION "G.729 decoder"
 	URL "https://www.linphone.org/technical-corner/bcg729/overview"
 	PURPOSE "Support for G.729 codec in RTP player"
+)
+set_package_properties(ILBC PROPERTIES
+	DESCRIPTION "iLBC decoder"
+	URL "https://github.com/TimothyGu/libilbc"
+	PURPOSE "Support for iLBC codec in RTP player"
 )
 set_package_properties(LIBXML2 PROPERTIES
 	DESCRIPTION "XML parsing library"
@@ -1585,6 +1615,11 @@ set_package_properties(SNAPPY PROPERTIES
 	DESCRIPTION "A fast compressor/decompressor from Google"
 	URL "https://google.github.io/snappy/"
 	PURPOSE "Snappy decompression in CQL and Kafka dissectors"
+)
+set_package_properties(ZSTD PROPERTIES
+	DESCRIPTION "A compressor/decompressor from Facebook providing better compression than Snappy at a cost of speed"
+	URL "https://facebook.github.io/zstd/"
+	PURPOSE "Zstd decompression in Kafka dissector"
 )
 set_package_properties(NGHTTP2 PROPERTIES
 	DESCRIPTION "HTTP/2 C library and tools"
@@ -1633,6 +1668,7 @@ endif()
 
 feature_summary(WHAT ALL)
 
+# Should this be part of libui?
 if(WIN32)
 	set(PLATFORM_UI_SRC
 		ui/win32/console_win32.c
@@ -1645,6 +1681,9 @@ elseif(APPLE)
 	set(PLATFORM_UI_SRC
 		ui/macosx/cocoa_bridge.mm
 	)
+	if (SPARKLE_FOUND)
+		list(APPEND PLATFORM_UI_SRC ui/macosx/sparkle_bridge.m)
+	endif()
 endif()
 
 set(TSHARK_TAP_SRC
@@ -1680,6 +1719,8 @@ set(TSHARK_TAP_SRC
 	${CMAKE_SOURCE_DIR}/ui/cli/tap-stats_tree.c
 	${CMAKE_SOURCE_DIR}/ui/cli/tap-sv.c
 	${CMAKE_SOURCE_DIR}/ui/cli/tap-wspstat.c
+	${CUSTOM_TSHARK_TAP_SRC}
+
 )
 
 set(INSTALL_DIRS
@@ -1740,15 +1781,9 @@ if (BUILD_xxx2deb)
 	)
 endif()
 
-if(WIN32)
-	set(TEXTIFY_FILES COPYING NEWS README.windows)
-	set(TEXTIFY_MD_FILES README.md)
-	foreach(_text_file ${TEXTIFY_FILES} ${TEXTIFY_MD_FILES})
-		string(REGEX REPLACE ".md$" "" _out_file ${_text_file})
-		set(INSTALL_FILES ${CMAKE_BINARY_DIR}/${_out_file}.txt ${INSTALL_FILES})
-	endforeach()
-else()
-	set(INSTALL_FILES COPYING ${INSTALL_FILES})
+if(NOT WIN32)
+	# We do this for Windows further down in the copy_data_files target.
+	list(APPEND INSTALL_FILES COPYING)
 endif()
 
 set(VERSION_INFO_LIBS
@@ -1772,10 +1807,11 @@ if(WIN32)
 	# Required DLLs and their corresponding PDBs.
 	add_custom_command(TARGET copy_cli_dlls PRE_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			${GLIB2_DLLS}
-			${GLIB2_PDBS}
+			"$<IF:$<CONFIG:Debug>,${GLIB2_DLLS_DEBUG},${GLIB2_DLLS_RELEASE}>"
+			"$<IF:$<CONFIG:Debug>,${GLIB2_PDBS_DEBUG},${GLIB2_PDBS_RELEASE}>"
 			"${_dll_output_dir}"
-		WORKING_DIRECTORY "${GLIB2_DLL_DIR}"
+		WORKING_DIRECTORY $<IF:$<CONFIG:Debug>,${GLIB2_DLL_DIR_DEBUG},${GLIB2_DLL_DIR_RELEASE}>
+		COMMAND_EXPAND_LISTS
 	)
 
 	# Optional DLLs and PDBs.
@@ -1810,8 +1846,12 @@ if(WIN32)
 		list (APPEND OPTIONAL_DLLS "${LZ4_DLL_DIR}/${LZ4_DLL}")
 		list (APPEND OPTIONAL_PDBS "${LZ4_DLL_DIR}/${LZ4_PDB}")
 	endif(LZ4_FOUND)
+	if (ZSTD_FOUND)
+		list (APPEND OPTIONAL_DLLS "${ZSTD_DLL_DIR}/${ZSTD_DLL}")
+	endif(ZSTD_FOUND)
 	if (NGHTTP2_FOUND)
 		list (APPEND OPTIONAL_DLLS "${NGHTTP2_DLL_DIR}/${NGHTTP2_DLL}")
+		list (APPEND OPTIONAL_PDBS "${NGHTTP2_DLL_DIR}/${NGHTTP2_PDB}")
 	endif(NGHTTP2_FOUND)
 	if (SBC_FOUND)
 		list (APPEND OPTIONAL_DLLS "${SBC_DLL_DIR}/${SBC_DLL}")
@@ -1822,6 +1862,9 @@ if(WIN32)
 	if (BCG729_FOUND)
 		list (APPEND OPTIONAL_DLLS "${BCG729_DLL_DIR}/${BCG729_DLL}")
 	endif(BCG729_FOUND)
+	if (ILBC_FOUND)
+		list (APPEND OPTIONAL_DLLS "${ILBC_DLL_DIR}/${ILBC_DLL}")
+	endif(ILBC_FOUND)
 	if (LIBXML2_FOUND)
 		foreach( _dll ${LIBXML2_DLLS} )
 			list (APPEND OPTIONAL_DLLS "${LIBXML2_DLL_DIR}/${_dll}")
@@ -1930,10 +1973,8 @@ if(WIN32)
 		add_custom_command(TARGET pdb_zip_package POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E remove -f "${_pdb_zip}"
 			COMMAND ${ZIP_EXECUTABLE} a -tzip -mmt=on "${_pdb_zip_win}"
-				*.pdb *.lib
-				extcap/*.pdb
-				${PLUGIN_VERSION_DIR}/epan/*.pdb
-				${PLUGIN_VERSION_DIR}/wiretap/*.pdb
+				-bb2
+				-r *.pdb *.lib
 			WORKING_DIRECTORY "${_dll_output_dir}"
 		)
 	endif()
@@ -1943,27 +1984,19 @@ endif(WIN32)
 set(copy_data_files_depends)
 
 if(WIN32)
-	foreach(_text_file ${TEXTIFY_FILES})
-		add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${_text_file}.txt
-			COMMAND ${POWERSHELL_COMMAND} "${CMAKE_SOURCE_DIR}/tools/textify.ps1"
-				-Destination ${CMAKE_BINARY_DIR}
-				${CMAKE_SOURCE_DIR}/${_text_file}
+	foreach(_install_as_txt_file COPYING NEWS README.md README.windows)
+		# On Windows, install some files with a .txt extension so that they're
+		# double-clickable.
+		string(REGEX REPLACE ".md$" "" _no_md_file ${_install_as_txt_file})
+		set(_output_file "${DATAFILE_DIR}/${_no_md_file}.txt")
+		add_custom_command(OUTPUT ${_output_file}
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				${CMAKE_SOURCE_DIR}/${_install_as_txt_file}
+				${_output_file}
 			DEPENDS
-				${CMAKE_SOURCE_DIR}/${_text_file}
+				${CMAKE_SOURCE_DIR}/${_install_as_txt_file}
 		)
-	endforeach()
-	foreach(_md_file ${TEXTIFY_MD_FILES})
-		string(REGEX REPLACE ".md$" ".txt" _text_file ${_md_file})
-		add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${_text_file}
-			COMMAND ${POWERSHELL_COMMAND} "${CMAKE_SOURCE_DIR}/tools/textify.ps1"
-				-Destination ${CMAKE_BINARY_DIR}
-				${CMAKE_SOURCE_DIR}/${_md_file}
-			COMMAND ${CMAKE_COMMAND} -E rename
-				${CMAKE_BINARY_DIR}/${_md_file}.txt
-				${CMAKE_BINARY_DIR}/${_text_file}
-			DEPENDS
-				${CMAKE_SOURCE_DIR}/${_text_file}
-		)
+		list(APPEND copy_data_files_depends "${_output_file}")
 	endforeach()
 endif()
 
@@ -2119,7 +2152,9 @@ set_target_properties(copy_data_files PROPERTIES FOLDER "Copy Tasks")
 # Shared code, build object files once for all users.
 add_library(version_info OBJECT version_info.c)
 target_include_directories(version_info SYSTEM PRIVATE ${VERSION_INFO_INCLUDE_DIRS})
-add_dependencies(version_info version)
+if(NOT VCSVERSION_OVERRIDE)
+	add_dependencies(version_info version)
+endif()
 # sources common for wireshark, tshark, rawshark and sharkd
 add_library(shark_common OBJECT
 	cfile.c
@@ -2140,7 +2175,6 @@ set_target_properties(version_info shark_common cli_main capture_opts
 
 if(BUILD_wireshark AND QT_FOUND)
 	set(WIRESHARK_SRC
-		capture_info.c
 		file.c
 		fileset.c
 		${PLATFORM_UI_SRC}
@@ -2240,6 +2274,7 @@ if(BUILD_wireshark AND QT_FOUND)
 		${APPLE_APPKIT_LIBRARY}
 		${APPLE_CORE_FOUNDATION_LIBRARY}
 		${APPLE_SYSTEM_CONFIGURATION_LIBRARY}
+		${SPARKLE_LIBRARIES}
 		${WIN_WS2_32_LIBRARY}
 		${WIN_VERSION_LIBRARY}
 		${WINSPARKLE_LIBRARIES}
@@ -2249,6 +2284,9 @@ if(BUILD_wireshark AND QT_FOUND)
 	)
 
 	add_executable(wireshark WIN32 MACOSX_BUNDLE ${wireshark_FILES} ${EXTRA_BUNDLE_FILES})
+	if(WIN32)
+		set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT wireshark)
+	endif()
 	set(PROGLIST ${PROGLIST} wireshark)
 	set_target_properties(wireshark PROPERTIES
 		LINK_FLAGS "${WS_LINK_FLAGS}"
@@ -2283,6 +2321,7 @@ if(BUILD_wireshark AND QT_FOUND)
 	endif()
 
 	target_link_libraries(wireshark ${wireshark_LIBS})
+	target_include_directories(wireshark SYSTEM PRIVATE ${SPARKLE_INCLUDE_DIRS})
 
 	install(
 		TARGETS wireshark
@@ -2385,6 +2424,7 @@ endif()
 
 if(BUILD_tfshark)
 	set(tfshark_LIBS
+		m
 		ui
 		wiretap
 		epan
@@ -2633,7 +2673,7 @@ if(BUILD_dumpcap AND PCAP_FOUND)
 		wsutil
 		caputils
 		ui
-		$<$<BOOL:${PCAP_FOUND}>:pcap::pcap>
+		pcap::pcap
 		${CAP_LIBRARIES}
 		${GLIB2_LIBRARIES}
 		${GTHREAD2_LIBRARIES}
@@ -2678,6 +2718,9 @@ if(BUILD_dumpcap AND PCAP_FOUND)
 			endif()"
 		)
 	endif()
+elseif(BUILD_dumpcap AND ENABLE_PCAP)
+	message(WARNING "Dumpcap was requested but libpcap dependency is not available. "
+		"Wireshark will be built without packet capture capability.")
 endif()
 
 # We have two idl2wrs utilities: this and the CORBA version in tools.
@@ -2741,6 +2784,129 @@ if (MAXMINDDB_FOUND)
 endif()
 
 if(ENABLE_APPLICATION_BUNDLE)
+	# --preserve-xattr is undocumented but ensures that we install
+	# a signed ChmodBPF script.
+	set (install_chmodbpf_component_pkg "${CMAKE_BINARY_DIR}/install.ChmodBPF.pkg")
+	add_custom_command(OUTPUT "${install_chmodbpf_component_pkg}"
+		COMMAND find
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/root"
+			-type d
+			-exec chmod 755 "{}" +
+		COMMAND chmod 644
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/root/Library/LaunchDaemons/org.wireshark.ChmodBPF.plist"
+		COMMAND chmod 755
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/root/Library/Application Support/Wireshark/ChmodBPF/ChmodBPF"
+		COMMAND "${CMAKE_SOURCE_DIR}/packaging/macosx/osx-extras.sh"
+		COMMAND pkgbuild
+			--identifier org.wireshark.ChmodBPF.pkg
+			--version 1.1
+			--preserve-xattr
+			--root "${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/root"
+			--scripts "${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/install-scripts"
+			${install_chmodbpf_component_pkg}
+		DEPENDS
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/root/Library/Application Support/Wireshark/ChmodBPF/ChmodBPF"
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/root/Library/LaunchDaemons/org.wireshark.ChmodBPF.plist"
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/install-scripts/postinstall"
+	)
+	set (install_chmodbpf_pkg "${CMAKE_BINARY_DIR}/run/Wireshark.app/Contents/Resources/Extras/Install ChmodBPF.pkg")
+	add_custom_command(OUTPUT "${install_chmodbpf_pkg}"
+		COMMAND productbuild
+			--identifier org.wireshark.install.ChmodBPF.product
+			--version 1.1
+			--distribution "${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/install-distribution.xml"
+			--package-path "${CMAKE_BINARY_DIR}"
+			${install_chmodbpf_pkg}
+		DEPENDS
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/install-distribution.xml"
+			${install_chmodbpf_component_pkg}
+	)
+
+	set (uninstall_chmodbpf_component_pkg "${CMAKE_BINARY_DIR}/uninstall.ChmodBPF.pkg")
+	add_custom_command(OUTPUT "${uninstall_chmodbpf_component_pkg}"
+		COMMAND pkgbuild
+			--identifier org.wireshark.uninstall.ChmodBPF.pkg
+			--version 1.1
+			--nopayload
+			--scripts "${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/uninstall-scripts"
+			${uninstall_chmodbpf_component_pkg}
+		DEPENDS
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/uninstall-scripts/postinstall"
+	)
+	set (uninstall_chmodbpf_pkg "${CMAKE_BINARY_DIR}/run/Wireshark.app/Contents/Resources/Extras/Uninstall ChmodBPF.pkg")
+	add_custom_command(OUTPUT "${uninstall_chmodbpf_pkg}"
+		COMMAND productbuild
+			--identifier org.wireshark.uninstall.ChmodBPF.product
+			--version 1.1
+			--distribution "${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/uninstall-distribution.xml"
+			--package-path "${CMAKE_BINARY_DIR}"
+			${uninstall_chmodbpf_pkg}
+		DEPENDS
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF/uninstall-distribution.xml"
+			${uninstall_chmodbpf_component_pkg}
+	)
+
+	add_custom_target(chmodbpf DEPENDS ${install_chmodbpf_pkg} ${uninstall_chmodbpf_pkg})
+
+	set (install_path_helper_component_pkg "${CMAKE_BINARY_DIR}/install.path_helper.pkg")
+	add_custom_command(OUTPUT "${install_path_helper_component_pkg}"
+		COMMAND find
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/root"
+			-type d
+			-exec chmod 755 "{}" +
+		COMMAND find
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/root"
+			-type f
+			-exec chmod 644 "{}" +
+		COMMAND pkgbuild
+			--identifier org.wireshark.path_helper.pkg
+			--version 1.0
+			--root "${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/root/etc"
+			--install-location /private/etc
+			${install_path_helper_component_pkg}
+		DEPENDS
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/root/etc/paths.d/Wireshark"
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/root/etc/manpaths.d/Wireshark"
+	)
+	set (install_path_helper_pkg "${CMAKE_BINARY_DIR}/run/Wireshark.app/Contents/Resources/Extras/Add Wireshark to the system path.pkg")
+	add_custom_command(OUTPUT "${install_path_helper_pkg}"
+		COMMAND productbuild
+			--identifier org.wireshark.install.path_helper.product
+			--version 1.0
+			--distribution "${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/install-distribution.xml"
+			--package-path "${CMAKE_BINARY_DIR}"
+			${install_path_helper_pkg}
+		DEPENDS
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/install-distribution.xml"
+			${install_path_helper_component_pkg}
+	)
+
+	set (uninstall_path_helper_component_pkg "${CMAKE_BINARY_DIR}/uninstall.path_helper.pkg")
+	add_custom_command(OUTPUT "${uninstall_path_helper_component_pkg}"
+		COMMAND pkgbuild
+			--identifier org.wireshark.uninstall.path_helper.pkg
+			--version 1.0
+			--nopayload
+			--scripts "${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/uninstall-scripts"
+			${uninstall_path_helper_component_pkg}
+		DEPENDS
+			"${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/uninstall-scripts/postinstall"
+	)
+	set (uninstall_path_helper_pkg "${CMAKE_BINARY_DIR}/run/Wireshark.app/Contents/Resources/Extras/Remove Wireshark from the system path.pkg")
+	add_custom_command(OUTPUT "${uninstall_path_helper_pkg}"
+		COMMAND productbuild
+			--identifier org.wireshark.uninstall.path_helper.product
+			--version 1.0
+			--distribution "${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/uninstall-distribution.xml"
+			--package-path "${CMAKE_BINARY_DIR}"
+			${uninstall_path_helper_pkg}
+		DEPENDS
+			${CMAKE_SOURCE_DIR}/packaging/macosx/path_helper/uninstall-distribution.xml
+			${uninstall_path_helper_component_pkg}
+	)
+
+	add_custom_target(path_helper DEPENDS ${install_path_helper_pkg} ${uninstall_path_helper_pkg})
+
 	add_custom_target(app_bundle)
 	set_target_properties(app_bundle PROPERTIES FOLDER "Copy Tasks")
 	add_custom_command(TARGET app_bundle
@@ -2748,39 +2914,28 @@ if(ENABLE_APPLICATION_BUNDLE)
 		COMMAND "${CMAKE_BINARY_DIR}/packaging/macosx/osx-app.sh"
 		WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/run"
 	)
-	add_dependencies(app_bundle ${PROGLIST})
+	add_dependencies(app_bundle ${PROGLIST} chmodbpf path_helper)
 
 	add_custom_target(dmg_package_prep DEPENDS app_bundle)
 
+	set(_read_me_first "packaging/macosx/Read me first.html")
 	ADD_CUSTOM_COMMAND(
-		OUTPUT ${CMAKE_BINARY_DIR}/packaging/macosx/PkgInfo
-		COMMAND ${CMAKE_COMMAND} -E echo APPLWshk > ${CMAKE_BINARY_DIR}/packaging/macosx/PkgInfo
+	OUTPUT
+		${_read_me_first}
+	COMMAND ${ASCIIDOCTOR_EXECUTABLE}
+		--backend html
+		--out-file ${_read_me_first}
+		--attribute include-dir=${CMAKE_SOURCE_DIR}/docbook
+		--attribute min-macos-version=${MIN_MACOS_VERSION}
+		${CMAKE_CURRENT_SOURCE_DIR}/packaging/macosx/Read_me_first.adoc
+	DEPENDS
+		${CMAKE_CURRENT_SOURCE_DIR}/packaging/macosx/Read_me_first.adoc
 	)
+	add_custom_target(read_me_first_html DEPENDS ${_read_me_first} )
+	add_dependencies(dmg_package_prep read_me_first_html)
 
 	ADD_CUSTOM_TARGET( dmg_package
-		COMMAND ${CMAKE_COMMAND} -E copy_directory
-					${CMAKE_SOURCE_DIR}/packaging/macosx/ChmodBPF
-					${CMAKE_BINARY_DIR}/run/ChmodBPF
-		COMMAND ${CMAKE_COMMAND} -E copy_directory
-					${CMAKE_SOURCE_DIR}/packaging/macosx/Scripts
-					${CMAKE_BINARY_DIR}/run/Scripts
-		COMMAND ${CMAKE_COMMAND} -E copy_directory
-					${CMAKE_SOURCE_DIR}/packaging/macosx/utility-launcher
-					${CMAKE_BINARY_DIR}/run/utility-launcher
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-					${CMAKE_SOURCE_DIR}/COPYING
-					${CMAKE_BINARY_DIR}/run/COPYING.txt
-		COMMAND ${CMAKE_COMMAND} -E copy_directory
-					${CMAKE_SOURCE_DIR}/packaging/macosx/Wireshark_package.pmdoc
-					${CMAKE_BINARY_DIR}/run/Wireshark_package.pmdoc
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-					${CMAKE_BINARY_DIR}/packaging/macosx/Wireshark_package.pmdoc/index.xml
-					${CMAKE_BINARY_DIR}/run/Wireshark_package.pmdoc/index.xml
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-					${CMAKE_SOURCE_DIR}/packaging/macosx/dmg_background.png
-					${CMAKE_BINARY_DIR}/run/dmg_background.png
 		COMMAND bash -x ${CMAKE_BINARY_DIR}/packaging/macosx/osx-dmg.sh
-			--source-directory ${CMAKE_SOURCE_DIR}/packaging/macosx
 		# Unlike nsis_package_prep + nsis_package, we can add a direct
 		# dependency here.
 		DEPENDS dmg_package_prep
@@ -2837,6 +2992,9 @@ if(RPMBUILD_EXECUTABLE)
 	if (BCG729_FOUND)
 		list(APPEND _rpmbuild_with_args --with bcg729)
 	endif()
+	if (ILBC_FOUND)
+		list(APPEND _rpmbuild_with_args --with ilbc)
+	endif()
 	if (LIBXML2_FOUND)
 		list(APPEND _rpmbuild_with_args --with libxml2)
 	endif()
@@ -2870,6 +3028,7 @@ if(RPMBUILD_EXECUTABLE)
 			--define "_topdir ${CMAKE_BINARY_DIR}/packaging/rpm"
 			--define "_prefix ${CMAKE_INSTALL_PREFIX}"
 			${_rpmbuild_with_args}
+			-v
 			-ba SPECS/wireshark.spec
 		DEPENDS "${CMAKE_BINARY_DIR}/packaging/rpm/SOURCES/${_export_tarball}"
 		WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/rpm"
@@ -3105,9 +3264,22 @@ if (DOXYGEN_EXECUTABLE)
 		COMMAND ${DOXYGEN_EXECUTABLE} doxygen.cfg
 	)
 
+	if (WIN32)
+		add_custom_target(wsar_html_perms DEPENDS wsar_html)
+	else()
+		add_custom_target(wsar_html_perms
+			COMMAND find wsar_html
+				-type d
+				-exec chmod 755 "{}" +
+			COMMAND find wsar_html
+				-type f
+				-exec chmod 644 "{}" +
+			DEPENDS wsar_html)
+	endif()
+
 	add_custom_target(wsar_html_zip
 		COMMAND ${CMAKE_COMMAND} -E tar "cfv" "wsar_html.zip" --format=zip wsar_html
-		DEPENDS wsar_html
+		DEPENDS wsar_html_perms
 	)
 	set_target_properties(wsar_html wsar_html_zip PROPERTIES
 		FOLDER "Docs"
@@ -3157,12 +3329,14 @@ set(_test_group_list
 	suite_dfilter.group_uint64
 	suite_dissection
 	suite_dissectors.group_asterix
+	suite_extcaps
 	suite_fileformats
 	suite_follow
 	suite_io
 	suite_mergecap
 	suite_nameres
 	suite_outputformats
+	suite_release
 	suite_text2pcap
 	suite_sharkd
 	suite_unittests

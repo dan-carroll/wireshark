@@ -1,4 +1,4 @@
--- 3GPP TS 36.355 V15.4.0 (2019-06)
+-- 3GPP TS 37.355 V15.0.0 (2019-12)
 --
 
 LPP-PDU-Definitions {
@@ -751,7 +751,8 @@ LocationSource-r13 ::= BIT STRING {	a-gnss				(0),
 									bt					(2),
 									tbs					(3),
 									sensor				(4),
-									ha-gnss-v1510		(5) } (SIZE(1..16))
+									ha-gnss-v1510		(5),
+									motion-sensor-v1550 (6) } (SIZE(1..16))
 
 
 CommonIEsAbort ::= SEQUENCE {

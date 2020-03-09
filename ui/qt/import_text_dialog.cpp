@@ -127,6 +127,7 @@ void ImportTextDialog::convertTextFile() {
     /* Use a random name for the temporary import buffer */
     import_info_.wdh = wtap_dump_open_tempfile(&tmpname, "import", WTAP_FILE_TYPE_SUBTYPE_PCAPNG, WTAP_UNCOMPRESSED, &params, &err);
     capfile_name_.append(tmpname ? tmpname : "temporary file");
+    g_free(tmpname);
     qDebug() << capfile_name_ << ":" << import_info_.wdh << import_info_.encapsulation << import_info_.max_frame_length;
     if (import_info_.wdh == NULL) {
         cfile_dump_open_failure_alert_box(capfile_name_.toUtf8().constData(), err, WTAP_FILE_TYPE_SUBTYPE_PCAP);
@@ -254,13 +255,13 @@ int ImportTextDialog::exec() {
             import_info_.dummy_header_type = HEADER_ETH;
         } else if (ti_ui_->ipv4Button->isChecked()) {
             import_info_.dummy_header_type = HEADER_IPV4;
-        } else if(ti_ui_->udpButton->isChecked()) {
+        } else if (ti_ui_->udpButton->isChecked()) {
             import_info_.dummy_header_type = HEADER_UDP;
-        } else if(ti_ui_->tcpButton->isChecked()) {
+        } else if (ti_ui_->tcpButton->isChecked()) {
             import_info_.dummy_header_type = HEADER_TCP;
-        } else if(ti_ui_->sctpButton->isChecked()) {
+        } else if (ti_ui_->sctpButton->isChecked()) {
             import_info_.dummy_header_type = HEADER_SCTP;
-        } else if(ti_ui_->sctpDataButton->isChecked()) {
+        } else if (ti_ui_->sctpDataButton->isChecked()) {
             import_info_.dummy_header_type = HEADER_SCTP_DATA;
         } else if (ti_ui_->exportPduButton->isChecked()) {
             import_info_.dummy_header_type = HEADER_EXPORT_PDU;

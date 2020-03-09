@@ -31,6 +31,9 @@ public:
 protected:
     virtual void applyValuePrivate(gboolean value)
     {
+        if (! proto_can_toggle_protocol(proto_get_id(proto_)) || proto_is_pino(proto_)) {
+            return;
+        }
         proto_set_decoding(proto_get_id(proto_), value);
     }
 
@@ -43,8 +46,9 @@ class HeuristicTreeItem : public EnabledProtocolItem
 public:
     HeuristicTreeItem(heur_dtbl_entry_t *heuristic, EnabledProtocolItem* parent)
         : EnabledProtocolItem(heuristic->short_name, heuristic->display_name, heuristic->enabled, parent),
-        heuristic_(heuristic)
+        heuristic_table_(heuristic)
     {
+        type_ = EnabledProtocolItem::Heuristic;
     }
 
     virtual ~HeuristicTreeItem() {}
@@ -52,11 +56,11 @@ public:
 protected:
     virtual void applyValuePrivate(gboolean value)
     {
-        heuristic_->enabled = value;
+        heuristic_table_->enabled = value;
     }
 
 private:
-    heur_dtbl_entry_t *heuristic_;
+    heur_dtbl_entry_t *heuristic_table_;
 };
 
 
@@ -65,12 +69,18 @@ EnabledProtocolItem::EnabledProtocolItem(QString name, QString description, bool
     name_(name),
     description_(description),
     enabled_(enabled),
-    enabledInit_(enabled)
+    enabledInit_(enabled),
+    type_(EnabledProtocolItem::Standard)
 {
 }
 
 EnabledProtocolItem::~EnabledProtocolItem()
 {
+}
+
+EnabledProtocolItem::EnableProtocolType EnabledProtocolItem::type() const
+{
+    return type_;
 }
 
 bool EnabledProtocolItem::applyValue()
@@ -225,7 +235,13 @@ QVariant EnabledProtocolsModel::data(const QModelIndex &index, int role) const
             break;
         }
         break;
+    case DATA_PROTOCOL_TYPE:
+        return QVariant::fromValue(item->type());
+        break;
+    default:
+    break;
     }
+
     return QVariant();
 }
 
@@ -289,54 +305,6 @@ void EnabledProtocolsModel::populate()
     emit endResetModel();
 }
 
-void EnabledProtocolsModel::invertEnabled()
-{
-    emit beginResetModel();
-
-    for (int proto_index = 0; proto_index < root_->childCount(); proto_index++) {
-        EnabledProtocolItem* proto = root_->child(proto_index);
-        proto->setEnabled(!proto->enabled());
-        for (int heur_index = 0; heur_index < proto->childCount(); heur_index++) {
-            EnabledProtocolItem* heur = proto->child(heur_index);
-            heur->setEnabled(!heur->enabled());
-        }
-    }
-
-    emit endResetModel();
-}
-
-void EnabledProtocolsModel::enableAll()
-{
-    emit beginResetModel();
-
-    for (int proto_index = 0; proto_index < root_->childCount(); proto_index++) {
-        EnabledProtocolItem* proto = root_->child(proto_index);
-        proto->setEnabled(true);
-        for (int heur_index = 0; heur_index < proto->childCount(); heur_index++) {
-            EnabledProtocolItem* heur = proto->child(heur_index);
-            heur->setEnabled(true);
-        }
-    }
-
-    emit endResetModel();
-}
-
-void EnabledProtocolsModel::disableAll()
-{
-    emit beginResetModel();
-
-    for (int proto_index = 0; proto_index < root_->childCount(); proto_index++) {
-        EnabledProtocolItem* proto = root_->child(proto_index);
-        proto->setEnabled(false);
-        for (int heur_index = 0; heur_index < proto->childCount(); heur_index++) {
-            EnabledProtocolItem* heur = proto->child(heur_index);
-            heur->setEnabled(false);
-        }
-    }
-
-    emit endResetModel();
-}
-
 void EnabledProtocolsModel::applyChanges(bool writeChanges)
 {
     bool redissect = false;
@@ -373,13 +341,12 @@ void EnabledProtocolsModel::saveChanges(bool writeChanges)
 }
 
 
-
-
 EnabledProtocolsProxyModel::EnabledProtocolsProxyModel(QObject * parent)
 : QSortFilterProxyModel(parent),
+type_(EnabledProtocolsProxyModel::EveryWhere),
+protocolType_(EnabledProtocolItem::Any),
 filter_()
-{
-}
+{}
 
 bool EnabledProtocolsProxyModel::lessThan(const QModelIndex &left, const QModelIndex &right) const
 {
@@ -391,9 +358,9 @@ bool EnabledProtocolsProxyModel::lessThan(const QModelIndex &left, const QModelI
 
         int compare_ret = 0;
 
-        if (left.column() == EnabledProtocolsModel::colProtocol )
+        if (left.column() == EnabledProtocolsModel::colProtocol)
             compare_ret = left_item->name().compare(right_item->name(), Qt::CaseInsensitive);
-        else if ( left.column() == EnabledProtocolsModel::colDescription )
+        else if (left.column() == EnabledProtocolsModel::colDescription)
             compare_ret = left_item->description().compare(right_item->description(), Qt::CaseInsensitive);
 
         if (compare_ret < 0)
@@ -403,54 +370,147 @@ bool EnabledProtocolsProxyModel::lessThan(const QModelIndex &left, const QModelI
     return false;
 }
 
-bool EnabledProtocolsProxyModel::filterAcceptItem(EnabledProtocolItem& item) const
+Qt::ItemFlags EnabledProtocolsProxyModel::flags(const QModelIndex &index) const
 {
-    QRegExp regex(filter_, Qt::CaseInsensitive);
+    Qt::ItemFlags flags = Qt::NoItemFlags;
+    if (index.isValid())
+    {
+        QModelIndex source = mapToSource(index);
+        if (filterAcceptsSelf(source.row(), source.parent()) )
+        {
+            flags = Qt::ItemIsEnabled;
+            flags |= Qt::ItemIsSelectable;
+            flags |= Qt::ItemIsUserCheckable;
+        }
+    }
 
-    if (item.name().contains(regex))
+    return flags;
+}
+
+bool EnabledProtocolsProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
+{
+    if (filterAcceptsSelf(sourceRow, sourceParent))
         return true;
 
-    if (item.description().contains(regex))
+#if 0
+    QModelIndex parent = sourceParent;
+    while (parent.isValid())
+    {
+        if (filterAcceptsSelf(parent.row(), parent.parent()))
+            return true;
+        parent = parent.parent();
+    }
+#endif
+
+    if (filterAcceptsChild(sourceRow, sourceParent))
         return true;
 
     return false;
 }
 
-bool EnabledProtocolsProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
+bool EnabledProtocolsProxyModel::filterAcceptsSelf(int sourceRow, const QModelIndex &sourceParent) const
 {
-
     QModelIndex nameIdx = sourceModel()->index(sourceRow, EnabledProtocolsModel::colProtocol, sourceParent);
+    if (! nameIdx.isValid())
+        return false;
     EnabledProtocolItem* item = static_cast<EnabledProtocolItem*>(nameIdx.internalPointer());
-    if (item == NULL)
+    if (! item)
+        return false;
+
+    QRegExp regex(filter_, Qt::CaseInsensitive);
+
+    if ((type_ != EnabledProtocolsProxyModel::EnabledItems && type_ != EnabledProtocolsProxyModel::DisabledItems) &&
+        (protocolType_ == EnabledProtocolItem::Any || protocolType_ == item->type()) )
+    {
+        if (! filter_.isEmpty())
+        {
+            if (item->name().contains(regex) && type_ != OnlyDescription)
+                return true;
+
+            if (item->description().contains(regex) && type_ != OnlyProtocol)
+                return true;
+        }
+        else
+            return true;
+    }
+    else if (type_ == EnabledProtocolsProxyModel::EnabledItems && item->enabled())
+        return true;
+    else if (type_ == EnabledProtocolsProxyModel::DisabledItems && ! item->enabled())
         return true;
 
-    if (!filter_.isEmpty()) {
-        if (filterAcceptItem(*item))
-            return true;
-
-        if (!nameIdx.parent().isValid())
-        {
-            EnabledProtocolItem* child_item;
-            for (int row = 0; row < item->childCount(); row++)
-            {
-                child_item = item->child(row);
-                if ((child_item != NULL) && (filterAcceptItem(*child_item)))
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
-    return true;
+    return false;
 }
 
-void EnabledProtocolsProxyModel::setFilter(const QString& filter)
+bool EnabledProtocolsProxyModel::filterAcceptsChild(int sourceRow, const QModelIndex &sourceParent) const
+{
+    QModelIndex item = sourceModel()->index(sourceRow, EnabledProtocolsModel::colProtocol, sourceParent);
+    if (! item.isValid())
+        return false;
+
+    int childCount = item.model()->rowCount(item);
+    if (childCount == 0)
+        return false;
+
+    for (int i = 0; i < childCount; i++)
+    {
+        if (filterAcceptsSelf(i, item))
+            return true;
+#if 0
+        /* Recursive search disabled for performance reasons */
+        if (filterAcceptsChild(i, item))
+            return true;
+#endif
+    }
+
+    return false;
+}
+
+void EnabledProtocolsProxyModel::setFilter(const QString& filter, EnabledProtocolsProxyModel::SearchType type,
+    EnabledProtocolItem::EnableProtocolType protocolType)
 {
     filter_ = filter;
+    type_ = type;
+    protocolType_ = protocolType;
     invalidateFilter();
 }
 
+void EnabledProtocolsProxyModel::setItemsEnable(EnabledProtocolsProxyModel::EnableType enableType, QModelIndex parent)
+{
+    if (! sourceModel())
+        return;
+
+    if (! parent.isValid())
+        emit beginResetModel();
+
+    for (int row = 0; row < rowCount(parent); row++)
+    {
+        QModelIndex idx = index(row, EnabledProtocolsModel::colProtocol, parent);
+
+        QModelIndex sIdx = mapToSource(idx);
+        if (sIdx.isValid())
+        {
+            EnabledProtocolItem* item = static_cast<EnabledProtocolItem*>(sIdx.internalPointer());
+            if (item && (protocolType_ == EnabledProtocolItem::Any || protocolType_ == item->type()) )
+            {
+                Qt::CheckState enable = idx.data(Qt::CheckStateRole).value<Qt::CheckState>();
+                if (enableType == Enable)
+                    enable = Qt::Checked;
+                else if (enableType == Disable)
+                    enable = Qt::Unchecked;
+                else
+                    enable = enable == Qt::Checked ? Qt::Unchecked : Qt::Checked;
+
+                sourceModel()->setData(mapToSource(idx), QVariant::fromValue(enable), Qt::CheckStateRole);
+            }
+        }
+
+        setItemsEnable(enableType, idx);
+    }
+
+
+    if (! parent.isValid())
+        emit endResetModel();
+}
 
 /*
  * Editor modelines

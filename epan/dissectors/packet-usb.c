@@ -220,11 +220,13 @@ static int hf_usb_bInterfaceClass = -1;
 static int hf_usb_bInterfaceSubClass = -1;
 static int hf_usb_bInterfaceSubClass_audio = -1;
 static int hf_usb_bInterfaceSubClass_cdc = -1;
+static int hf_usb_bInterfaceSubClass_massstorage = -1;
 static int hf_usb_bInterfaceSubClass_hid = -1;
 static int hf_usb_bInterfaceSubClass_misc = -1;
 static int hf_usb_bInterfaceSubClass_app = -1;
 static int hf_usb_bInterfaceProtocol = -1;
 static int hf_usb_bInterfaceProtocol_cdc = -1;
+static int hf_usb_bInterfaceProtocol_massstorage = -1;
 static int hf_usb_bInterfaceProtocol_cdc_data = -1;
 static int hf_usb_bInterfaceProtocol_hid_boot = -1;
 static int hf_usb_bInterfaceProtocol_app_dfu = -1;
@@ -241,6 +243,8 @@ static int hf_usb_wMaxPacketSize_size = -1;
 static int hf_usb_wMaxPacketSize_slots = -1;
 static int hf_usb_bInterval = -1;
 static int hf_usb_bMaxBurst = -1;
+static int hf_usb_audio_bRefresh = -1;
+static int hf_usb_audio_bSynchAddress = -1;
 static int hf_usb_bSSEndpointAttributeBulkMaxStreams = -1;
 static int hf_usb_bSSEndpointAttributeIsoMult = -1;
 static int hf_usb_wBytesPerInterval = -1;
@@ -408,6 +412,7 @@ static dissector_table_t product_to_dissector;
 typedef struct _device_product_data_t {
     guint16  vendor;
     guint16  product;
+    guint16  device;
     guint  bus_id;
     guint  device_address;
 } device_product_data_t;
@@ -423,6 +428,7 @@ typedef struct _usb_alt_setting_t {
     guint8 interfaceClass;
     guint8 interfaceSubclass;
     guint8 interfaceProtocol;
+    guint8 interfaceNum;
 } usb_alt_setting_t;
 
 typedef struct {
@@ -876,6 +882,7 @@ extern value_string_ext ext_usb_vendors_vals;
 extern value_string_ext ext_usb_products_vals;
 extern value_string_ext ext_usb_audio_subclass_vals;
 extern value_string_ext ext_usb_com_subclass_vals;
+extern value_string_ext ext_usb_massstorage_subclass_vals;
 extern value_string_ext linux_negative_errno_vals_ext;
 
 /*
@@ -1197,6 +1204,8 @@ static const value_string usb_cdc_protocol_vals[] = {
     {0, NULL}
 };
 static value_string_ext usb_cdc_protocol_vals_ext = VALUE_STRING_EXT_INIT(usb_cdc_protocol_vals);
+
+extern value_string_ext usb_massstorage_protocol_vals_ext;
 
 static const value_string usb_cdc_data_protocol_vals[] = {
     {0x00, "No class specific protocol required"},
@@ -2129,6 +2138,11 @@ dissect_usb_device_descriptor(packet_info *pinfo, proto_tree *parent_tree,
                                      product_id);
     offset += 2;
 
+    /* bcdDevice */
+    usb_conv_info->deviceVersion = tvb_get_letohs(tvb, offset);
+    proto_tree_add_item(tree, hf_usb_bcdDevice, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    offset += 2;
+
     if (!pinfo->fd->visited) {
         guint                   k_bus_id;
         guint                   k_device_address;
@@ -2153,6 +2167,7 @@ dissect_usb_device_descriptor(packet_info *pinfo, proto_tree *parent_tree,
         device_product_data = wmem_new(wmem_file_scope(), device_product_data_t);
         device_product_data->vendor = vendor_id;
         device_product_data->product = product_id;
+        device_product_data->device = usb_conv_info->deviceVersion;
         device_product_data->bus_id = usb_conv_info->bus_id;
         device_product_data->device_address = usb_conv_info->device_address;
         wmem_tree_insert32_array(device_to_product_table, key, device_product_data);
@@ -2164,11 +2179,6 @@ dissect_usb_device_descriptor(packet_info *pinfo, proto_tree *parent_tree,
 
         wmem_tree_insert32_array(device_to_protocol_table, key, device_protocol_data);
     }
-
-    /* bcdDevice */
-    usb_conv_info->deviceVersion = tvb_get_letohs(tvb, offset);
-    proto_tree_add_item(tree, hf_usb_bcdDevice, tvb, offset, 2, ENC_LITTLE_ENDIAN);
-    offset += 2;
 
     /* iManufacturer */
     proto_tree_add_item(tree, hf_usb_iManufacturer, tvb, offset, 1, ENC_LITTLE_ENDIAN);
@@ -2308,6 +2318,7 @@ dissect_usb_interface_descriptor(packet_info *pinfo, proto_tree *parent_tree,
         alternate_setting.interfaceClass = tvb_get_guint8(tvb, offset);
         alternate_setting.interfaceSubclass = tvb_get_guint8(tvb, offset+1);
         alternate_setting.interfaceProtocol = tvb_get_guint8(tvb, offset+2);
+        alternate_setting.interfaceNum = interface_num;
         wmem_array_append_one(usb_trans_info->interface_info->alt_settings, alternate_setting);
 
         if (alt_setting == 0) {
@@ -2319,8 +2330,10 @@ dissect_usb_interface_descriptor(packet_info *pinfo, proto_tree *parent_tree,
             usb_trans_info->interface_info->interfaceClass = alternate_setting.interfaceClass;
             usb_trans_info->interface_info->interfaceSubclass = alternate_setting.interfaceSubclass;
             usb_trans_info->interface_info->interfaceProtocol = alternate_setting.interfaceProtocol;
+            usb_trans_info->interface_info->interfaceNum      = alternate_setting.interfaceNum;
             usb_trans_info->interface_info->deviceVendor      = usb_conv_info->deviceVendor;
             usb_trans_info->interface_info->deviceProduct     = usb_conv_info->deviceProduct;
+            usb_trans_info->interface_info->deviceVersion     = usb_conv_info->deviceVersion;
         }
     }
     offset += 1;
@@ -2332,6 +2345,9 @@ dissect_usb_interface_descriptor(packet_info *pinfo, proto_tree *parent_tree,
         break;
     case IF_CLASS_COMMUNICATIONS:
         proto_tree_add_item(tree, hf_usb_bInterfaceSubClass_cdc, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        break;
+    case IF_CLASS_MASS_STORAGE:
+        proto_tree_add_item(tree, hf_usb_bInterfaceSubClass_massstorage, tvb, offset, 1, ENC_LITTLE_ENDIAN);
         break;
     case IF_CLASS_HID:
         proto_tree_add_item(tree, hf_usb_bInterfaceSubClass_hid, tvb, offset, 1, ENC_LITTLE_ENDIAN);
@@ -2354,6 +2370,9 @@ dissect_usb_interface_descriptor(packet_info *pinfo, proto_tree *parent_tree,
     switch (usb_conv_info->interfaceClass) {
     case IF_CLASS_COMMUNICATIONS:
         proto_tree_add_item(tree, hf_usb_bInterfaceProtocol_cdc, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        break;
+    case IF_CLASS_MASS_STORAGE:
+        proto_tree_add_item(tree, hf_usb_bInterfaceProtocol_massstorage, tvb, offset, 1, ENC_LITTLE_ENDIAN);
         break;
     case IF_CLASS_CDC_DATA:
         proto_tree_add_item(tree, hf_usb_bInterfaceProtocol_cdc_data, tvb, offset, 1, ENC_LITTLE_ENDIAN);
@@ -2539,6 +2558,14 @@ dissect_usb_endpoint_descriptor(packet_info *pinfo, proto_tree *parent_tree,
     /* bInterval */
     proto_tree_add_item(tree, hf_usb_bInterval, tvb, offset, 1, ENC_LITTLE_ENDIAN);
     offset += 1;
+
+    if (usb_conv_info && (usb_conv_info->interfaceClass == IF_CLASS_AUDIO)) {
+        proto_tree_add_item(tree, hf_usb_audio_bRefresh, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        offset += 1;
+
+        proto_tree_add_item(tree, hf_usb_audio_bSynchAddress, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        offset += 1;
+    }
 
     proto_item_set_len(item, len);
 
@@ -3179,6 +3206,7 @@ dissect_usb_setup_set_interface_request(packet_info *pinfo, proto_tree *tree,
                 iface_conv_info->interfaceClass = alternate_setting->interfaceClass;
                 iface_conv_info->interfaceSubclass = alternate_setting->interfaceSubclass;
                 iface_conv_info->interfaceProtocol = alternate_setting->interfaceProtocol;
+                iface_conv_info->interfaceNum = alternate_setting->interfaceNum;
                 break;
             }
         }
@@ -4077,7 +4105,7 @@ dissect_darwin_buffer_packet_header(tvbuff_t *tvb, packet_info *pinfo, proto_tre
 }
 
 /* Set the usb_address_t fields based on the direction of the urb */
-static void
+void
 usb_set_addr(proto_tree *tree, tvbuff_t *tvb, packet_info *pinfo, guint16 bus_id, guint16 device_address,
              int endpoint, gboolean req)
 {
@@ -4571,6 +4599,9 @@ dissect_usb_payload(tvbuff_t *tvb, packet_info *pinfo,
             device_product_data->device_address == device_address) {
         p_add_proto_data(pinfo->pool, pinfo, proto_usb, USB_VENDOR_ID, GUINT_TO_POINTER((guint)device_product_data->vendor));
         p_add_proto_data(pinfo->pool, pinfo, proto_usb, USB_PRODUCT_ID, GUINT_TO_POINTER((guint)device_product_data->product));
+        usb_conv_info->deviceVendor = device_product_data->vendor;
+        usb_conv_info->deviceProduct = device_product_data->product;
+        usb_conv_info->deviceVersion = device_product_data->device;
     }
 
     device_protocol_data = (device_protocol_data_t *) wmem_tree_lookup32_array_le(device_to_protocol_table, key);
@@ -6153,6 +6184,11 @@ proto_register_usb(void)
             FT_UINT8, BASE_HEX | BASE_EXT_STRING, &ext_usb_com_subclass_vals, 0x0,
             NULL, HFILL }},
 
+        { &hf_usb_bInterfaceSubClass_massstorage ,
+          { "bInterfaceSubClass", "usb.bInterfaceSubClass",
+            FT_UINT8, BASE_HEX | BASE_EXT_STRING, &ext_usb_massstorage_subclass_vals, 0x0,
+            NULL, HFILL }},
+
         { &hf_usb_bInterfaceSubClass_hid,
           { "bInterfaceSubClass", "usb.bInterfaceSubClass",
             FT_UINT8, BASE_HEX | BASE_EXT_STRING, &usb_hid_subclass_vals_ext, 0x0,
@@ -6176,6 +6212,11 @@ proto_register_usb(void)
         { &hf_usb_bInterfaceProtocol_cdc,
           { "bInterfaceProtocol", "usb.bInterfaceProtocol",
             FT_UINT8, BASE_HEX | BASE_EXT_STRING, &usb_cdc_protocol_vals_ext, 0x0,
+            NULL, HFILL }},
+
+        { &hf_usb_bInterfaceProtocol_massstorage,
+          { "bInterfaceProtocol", "usb.bInterfaceProtocol",
+            FT_UINT8, BASE_HEX | BASE_EXT_STRING, &usb_massstorage_protocol_vals_ext, 0x0,
             NULL, HFILL }},
 
         { &hf_usb_bInterfaceProtocol_cdc_data,
@@ -6263,6 +6304,16 @@ proto_register_usb(void)
           { "bMaxBurst", "usb.bMaxBurst",
             FT_UINT8, BASE_DEC, NULL, 0x0,
             "Valid values are from 0 to 15. For control endpoints this value shall be 0.", HFILL }},
+
+        { &hf_usb_audio_bRefresh,
+          { "bRefresh", "usb.audio.bRefresh",
+            FT_UINT8, BASE_DEC, NULL, 0x00,
+            NULL, HFILL }},
+
+        { &hf_usb_audio_bSynchAddress,
+          { "bSynchAddress", "usb.audio.bSynchAddress",
+            FT_UINT8, BASE_DEC, NULL, 0x00,
+            NULL, HFILL }},
 
         { &hf_usb_bSSEndpointAttributeBulkMaxStreams,
           { "MaxStreams", "usb.bmAttributes.MaxStreams",

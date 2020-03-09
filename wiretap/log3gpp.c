@@ -97,22 +97,26 @@ void log3gpp_close(wtap* wth)
     wth->priv = NULL;
 }
 
+#if 0
 static gboolean
 log3gpp_dump(wtap_dumper* wdh _U_, const wtap_rec* rec _U_,
     const guchar* buf _U_, int* err _U_, gchar** err_info _U_)
 {
     return TRUE;
 }
+#endif
 
 
 /******************************************************/
 /* Close a file we've been writing to.                */
 /******************************************************/
+#if 0
 static gboolean
 log3gpp_dump_finish(wtap_dumper* wdh _U_, int* err _U_)
 {
     return TRUE;
 }
+#endif
 
 /********************************************/
 /* Open file (for reading)                 */
@@ -456,6 +460,7 @@ log3gpp_seek_read(wtap *wth, gint64 seek_off,
 /* The file that we are writing to has been opened.  */
 /* Set other dump callbacks.                         */
 /*****************************************************/
+#if 0
 gboolean log3gpp_dump_open(wtap_dumper *wdh, gboolean cant_seek _U_, int *err _U_)
 {
     /* Fill in other dump callbacks */
@@ -464,6 +469,7 @@ gboolean log3gpp_dump_open(wtap_dumper *wdh, gboolean cant_seek _U_, int *err _U
 
     return TRUE;
 }
+#endif
 
 /*****************************************/
 /* Write a single packet out to the file */
@@ -698,7 +704,7 @@ gboolean parse_line(gchar* linebuff, gint line_length, gint *seconds, gint *usec
       n++;
 
       /* Now skip ahead to find start of data (marked by '$') */
-      for (; (linebuff[n] != '$') && (n <= line_length) && (prot_option_chars <= MAX_PROTOCOL_PAR_STRING);
+      for (; (n <= line_length) && (linebuff[n] != '$') && (prot_option_chars <= MAX_PROTOCOL_PAR_STRING);
            n++,prot_option_chars++)
       {
         protocol_parameters[prot_option_chars] = linebuff[n];
@@ -814,7 +820,7 @@ gboolean get_file_time_stamp(gchar* linebuff, time_t *secs, guint32 *usecs)
 
     /**************************************************************/
     /* First is month. Read until get a space following the month */
-    for (n=0; (linebuff[n] != ' ') && (n < MAX_MONTH_LETTERS); n++)
+    for (n=0; (n < MAX_MONTH_LETTERS) && (linebuff[n] != ' '); n++)
     {
         month[n] = linebuff[n];
     }

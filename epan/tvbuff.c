@@ -3503,9 +3503,9 @@ static ws_mempbrk_pattern pbrk_crlf;
  * if "desegment" is false, return the amount of data remaining in
  * the buffer.
  *
- * Set "*next_offset" to the offset of the character past the line
- * terminator, or past the end of the buffer if we don't find a line
- * terminator.	(It's not set if we return -1.)
+ * If "next_offset" is not NULL, set "*next_offset" to the offset of the
+ * character past the line terminator, or past the end of the buffer if
+ * we don't find a line terminator.  (It's not set if we return -1.)
  */
 gint
 tvb_find_line_end(tvbuff_t *tvb, const gint offset, int len, gint *next_offset, const gboolean desegment)
@@ -3626,9 +3626,9 @@ static ws_mempbrk_pattern pbrk_crlf_dquote;
  * the end), or the amount of data remaining in the buffer if we don't
  * find a line terminator.
  *
- * Set "*next_offset" to the offset of the character past the line
- * terminator, or past the end of the buffer if we don't find a line
- * terminator.
+ * If "next_offset" is not NULL, set "*next_offset" to the offset of the
+ * character past the line terminator, or past the end of the buffer if
+ * we don't find a line terminator.
  */
 gint
 tvb_find_line_end_unquoted(tvbuff_t *tvb, const gint offset, int len, gint *next_offset)
@@ -4082,7 +4082,22 @@ tvb_get_varint(tvbuff_t *tvb, guint offset, guint maxlen, guint64 *value, const 
 				return i + 1;
 			}
 		}
-	} else if (encoding & ENC_VARINT_QUIC) {
+	} else if (encoding & ENC_VARINT_ZIGZAG) {
+		guint i;
+		guint64 b; /* current byte */
+
+		for (i = 0; ((i < FT_VARINT_MAX_LEN) && (i < maxlen)); ++i) {
+			b = tvb_get_guint8(tvb, offset++);
+			*value |= ((b & 0x7F) << (i * 7)); /* add lower 7 bits to val */
+
+			if (b < 0x80) {
+				/* end successfully becauseof last byte's msb(most significant bit) is zero */
+				*value = (*value >> 1) ^ ((*value & 1) ? -1 : 0);
+				return i + 1;
+			}
+		}
+	}
+	else if (encoding & ENC_VARINT_QUIC) {
 
 		/* calculate variable length */
 		*value = tvb_get_guint8(tvb, offset);

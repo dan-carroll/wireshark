@@ -74,6 +74,8 @@ SysInfoType16_PDU
 SysInfoType17_PDU
 SysInfoType18_PDU
 SysInfoType19_PDU
+SysInfoTypeSB1_PDU
+SysInfoTypeSB2_PDU
 MasterInformationBlock_PDU
 MeasurementReport_PDU
 
@@ -818,6 +820,7 @@ HandoverFromUTRANCommand-GSM-r6-IEs/gsm-message/single-GSM-Message single-GSM-Me
 
 #.FN_BODY PLMN-Identity
   wmem_strbuf_t* mcc_mnc_strbuf;
+  wmem_strbuf_t* mcc_strbuf;
   guint32 string_len;
   gchar* mcc_mnc_string;
   tvbuff_t* mcc_mnc_tvb;
@@ -839,6 +842,17 @@ HandoverFromUTRANCommand-GSM-r6-IEs/gsm-message/single-GSM-Message single-GSM-Me
   string_len = (guint32)wmem_strbuf_get_len(mcc_mnc_strbuf);
   mcc_mnc_string = wmem_strbuf_finalize(mcc_mnc_strbuf);
 
+  if(string_len >= 3)
+  {
+    /* 3 MCC digits were found, keep for later in case MCC is missing in other PLMN ids*/
+    mcc_strbuf = wmem_strbuf_sized_new(actx->pinfo->pool,4,4);
+    wmem_strbuf_append_c(mcc_strbuf,mcc_mnc_string[0]);
+    wmem_strbuf_append_c(mcc_strbuf,mcc_mnc_string[1]);
+    wmem_strbuf_append_c(mcc_strbuf,mcc_mnc_string[2]);
+    wmem_strbuf_append_c(mcc_strbuf,'\0');
+    private_data_set_last_mcc_strbuf(actx,mcc_strbuf);
+  }
+
   /* Creating TVB from extracted string*/
   mcc_mnc_tvb = tvb_new_child_real_data(tvb, (guint8*)mcc_mnc_string, string_len, string_len);
   add_new_data_source(actx->pinfo, mcc_mnc_tvb, "MCC-MNC");
@@ -848,6 +862,8 @@ HandoverFromUTRANCommand-GSM-r6-IEs/gsm-message/single-GSM-Message single-GSM-Me
 
 #.FN_BODY PLMN-IdentityWithOptionalMCC-r6
   wmem_strbuf_t* mcc_mnc_strbuf;
+  wmem_strbuf_t* temp_strbuf;
+  wmem_strbuf_t* last_mcc_strbuf;
   guint32 string_len;
   gchar* mcc_mnc_string;
   tvbuff_t* mcc_mnc_tvb;
@@ -867,10 +883,35 @@ HandoverFromUTRANCommand-GSM-r6-IEs/gsm-message/single-GSM-Message single-GSM-Me
 
   /* Extracting the string collected in the strbuf */
   string_len = (guint32)wmem_strbuf_get_len(mcc_mnc_strbuf);
+  mcc_mnc_string = wmem_strbuf_finalize(mcc_mnc_strbuf);
+  if (string_len > 3) {
+      /* 3 MCC digits and at least 1 MNC digit were found, keep MCC for later
+         in case it's missing in other PLMN ids*/
+    temp_strbuf = wmem_strbuf_sized_new(actx->pinfo->pool,4,4);
+    wmem_strbuf_append_c(temp_strbuf,mcc_mnc_string[0]);
+    wmem_strbuf_append_c(temp_strbuf,mcc_mnc_string[1]);
+    wmem_strbuf_append_c(temp_strbuf,mcc_mnc_string[2]);
+    wmem_strbuf_append_c(temp_strbuf,'\0');
+    private_data_set_last_mcc_strbuf(actx,temp_strbuf);
+  }
+  else {
+      /* mcc_mnc_strbuf Probably only has 3/2 digits of MNC */
+      /* Try to fill MCC form "last MCC" if we have it stored */
+      last_mcc_strbuf = private_data_get_last_mcc_strbuf(actx);
+      if(last_mcc_strbuf)
+      {
+        /* Concat MCC and MNC in temp buffer */
+        temp_strbuf = wmem_strbuf_sized_new(actx->pinfo->pool,7,7);
+        wmem_strbuf_append_printf(temp_strbuf,"%%s",wmem_strbuf_get_str(last_mcc_strbuf));
+        wmem_strbuf_append_printf(temp_strbuf,"%%s",mcc_mnc_string);
+        /* Update length of recovered MCC-MNC pair */
+        string_len = (guint32)wmem_strbuf_get_len(temp_strbuf);
+        mcc_mnc_string = wmem_strbuf_finalize(temp_strbuf);
+      }
+  }
+
   if (string_len >= 5) {
-    /* optional MCC was present, we can call E.212 dissector */
-    /* if not present, we could apply the algorithm in 25.331 chapter 8.1.1.5 */
-    mcc_mnc_string = wmem_strbuf_finalize(mcc_mnc_strbuf);
+    /* optional MCC was present (or restored above), we can call E.212 dissector */
 
     /* Creating TVB from extracted string*/
     mcc_mnc_tvb = tvb_new_child_real_data(tvb, (guint8*)mcc_mnc_string, string_len, string_len);
@@ -933,6 +974,140 @@ HandoverFromUTRANCommand-GSM-r6-IEs/gsm-message/single-GSM-Message single-GSM-Me
     /* Appending to the digits string */
     wmem_strbuf_append_c(digits_strbuf, digit_char);
   }
+
+#.FN_BODY CompleteSIBshort
+  private_data_set_curr_sib_segment_type(actx,RRC_SIB_SEG_COMP);
+%(DEFAULT_BODY)s
+  private_data_set_curr_sib_segment_type(actx,RRC_SIB_SEG_NO_SEGMENT); /* Resetting value */
+
+#.FN_BODY SIB-Type VAL_PTR = &sib_type
+  guint32 sib_type;
+%(DEFAULT_BODY)s
+  private_data_set_curr_sib_type(actx,sib_type);
+
+#.FN_BODY SIB-Data-variable VAL_PTR = &sib_data_tvb
+  tvbuff_t *sib_data_tvb;
+  guint32 sib_type;
+  proto_tree *subtree;
+  guint32 seg_type;
+
+%(DEFAULT_BODY)s
+
+  seg_type = (guint32)private_data_get_curr_sib_segment_type(actx);
+  if(seg_type != RRC_SIB_SEG_COMP) {
+      /* TODO: The Dissector only handles 'complete SIBs' right now.
+       * Reassembly logic should be implemented, taking into acocunt that
+       * different fragments might arrive in different frames.
+       */
+      return offset;
+  }
+
+  /* This is a complete SIB - Call handler according to previous SIB-Type field*/
+  subtree = proto_item_add_subtree(actx->created_item, ett_rrc_sib_data_var);
+  sib_type = private_data_get_curr_sib_type(actx);
+  col_set_fence(actx->pinfo->cinfo, COL_INFO);
+  col_append_str(actx->pinfo->cinfo, COL_INFO," (");
+  switch(sib_type){
+    case 0:
+      /* mIB */
+      dissect_rrc_MasterInformationBlock_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 1:
+      dissect_rrc_SysInfoType1_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 2:
+      dissect_rrc_SysInfoType2_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 3:
+      dissect_rrc_SysInfoType3_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 4:
+      dissect_rrc_SysInfoType4_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 5:
+      dissect_rrc_SysInfoType5_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 6:
+      dissect_rrc_SysInfoType6_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 7:
+      dissect_rrc_SysInfoType7_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 11:
+      dissect_rrc_SysInfoType11_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 12:
+      dissect_rrc_SysInfoType12_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 13:
+      dissect_rrc_SysInfoType13_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 14:
+      /* SIB-Type: systemInformationBlockType13-1 */
+      dissect_rrc_SysInfoType13_1_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 15:
+      /* SIB-Type: systemInformationBlockType13-2 */
+      dissect_rrc_SysInfoType13_2_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 16:
+      /* SIB-Type: systemInformationBlockType13-3 */
+      dissect_rrc_SysInfoType13_3_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 17:
+      /* SIB-Type: systemInformationBlockType13-4 */
+      dissect_rrc_SysInfoType13_4_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 18:
+      /* SIB-Type: systemInformationBlockType14 */
+      dissect_rrc_SysInfoType14_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 19:
+      /* SIB-Type: systemInformationBlockType15 */
+      dissect_rrc_SysInfoType15_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 20:
+      /* SIB-Type: systemInformationBlockType15-1 */
+      dissect_rrc_SysInfoType15_1_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 21:
+      /* SIB-Type: systemInformationBlockType15-2 */
+      dissect_rrc_SysInfoType15_2_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 22:
+      /* SIB-Type: systemInformationBlockType15-3 */
+      dissect_rrc_SysInfoType15_3_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 23:
+      /* SIB-Type: systemInformationBlockType16 */
+      dissect_rrc_SysInfoType16_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 24:
+      /* SIB-Type: systemInformationBlockType17 */
+      dissect_rrc_SysInfoType17_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 25:
+      /* SIB-Type: systemInformationBlockType15-4 */
+      dissect_rrc_SysInfoType15_4_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 26:
+      /* SIB-Type: systemInformationBlockType18 */
+      dissect_rrc_SysInfoType18_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 27:
+      /* SIB-Type: schedulingBlock1 */
+      dissect_rrc_SysInfoTypeSB1_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    case 28:
+      /* SIB-Type: schedulingBlock2 */
+      dissect_rrc_SysInfoTypeSB2_PDU(sib_data_tvb, actx->pinfo, subtree, NULL);
+      break;
+    default:
+      break;
+    }
+
+  col_append_str(actx->pinfo->cinfo, COL_INFO,")");
+  col_set_fence(actx->pinfo->cinfo, COL_INFO);
 
 #.FN_BODY RSR-VCC-Info/ims-Information VAL_PTR = &imsInformation_tvb
   tvbuff_t *imsInformation_tvb=NULL;
@@ -1377,5 +1552,192 @@ private_data_set_rlc_ciphering_sqn(actx, rlc_ciphering_sqn);
   col_append_fstr(actx->pinfo->cinfo, COL_INFO, " [cause=%%s]",
                   val_to_str(value, rrc_ReleaseCause_vals, "Unknown"));
 
-#.END
+#.FN_BODY MasterInformationBlock
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "MasterInformationBlock");
+%(DEFAULT_BODY)s
 
+#.FN_BODY SysInfoType1
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 1");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType2
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 2");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType3
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 3");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType4
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 4");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType5
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 5");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType5bis
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 5bis");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType6
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 6");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType7
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 7");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType11
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 11");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType11bis
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 11bis");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType11ter
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 11ter");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType12
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 12");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType13
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 13");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType13-1
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 13.1");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType13-2
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 13.2");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType13-3
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 13.3");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType13-4
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 13.4");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType14
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 14");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15bis
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15bis");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-1
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.1");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-1bis
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.1bis");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-1ter
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.1ter");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-2
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.2");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-2bis
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.2bis");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-2ter
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.2ter");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-3
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.3");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-3bis
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.3bis");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-4
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.4");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-5
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.5");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-6
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.6");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-7
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.7");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType15-8
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 15.8");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType16
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 16");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType17
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 17");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType18
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 18");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType19
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 19");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType20
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 20");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType21
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 21");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType22
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 22");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType23
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 23");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType24
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 24");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoType25
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "SysInfoType 25");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoTypeSB1
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "Scheduling Block 1");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoTypeSB2
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "Scheduling Block 2");
+%(DEFAULT_BODY)s
+
+#.FN_BODY SysInfoTypeSB3
+  col_append_str(actx->pinfo->cinfo, COL_INFO, "Scheduling Block 3");
+%(DEFAULT_BODY)s
+
+#.END

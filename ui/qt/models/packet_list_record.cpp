@@ -27,14 +27,17 @@
 
 QMap<int, int> PacketListRecord::cinfo_column_;
 unsigned PacketListRecord::col_data_ver_ = 1;
+unsigned PacketListRecord::rows_color_ver_ = 1;
 
 PacketListRecord::PacketListRecord(frame_data *frameData) :
     fdata_(frameData),
     lines_(1),
     line_count_changed_(false),
     data_ver_(0),
+    color_ver_(0),
     colorized_(false),
-    conv_index_(0)
+    conv_index_(0),
+    read_failed_(false)
 {
 }
 
@@ -54,7 +57,7 @@ const QString PacketListRecord::columnString(capture_file *cap_file, int column,
         return QString();
     }
 
-    bool dissect_color = colorized && !colorized_;
+    bool dissect_color = ( colorized && !colorized_ ) || ( color_ver_ != rows_color_ver_ );
     if (column >= col_text_.count() || col_text_.at(column).isNull() || data_ver_ != col_data_ver_ || dissect_color) {
         dissect(cap_file, dissect_color);
     }
@@ -80,11 +83,6 @@ void PacketListRecord::resetColumns(column_info *cinfo)
     }
 }
 
-void PacketListRecord::resetColorized()
-{
-    colorized_ = false;
-}
-
 void PacketListRecord::dissect(capture_file *cap_file, bool dissect_color)
 {
     // packet_list_store.c:packet_list_dissect_and_cache_record
@@ -106,7 +104,13 @@ void PacketListRecord::dissect(capture_file *cap_file, bool dissect_color)
 
     wtap_rec_init(&rec);
     ws_buffer_init(&buf, 1514);
-    if (!cf_read_record(cap_file, fdata_, &rec, &buf)) {
+    if (read_failed_) {
+        read_failed_ = !cf_read_record_no_alert(cap_file, fdata_, &rec, &buf);
+    } else {
+        read_failed_ = !cf_read_record(cap_file, fdata_, &rec, &buf);
+    }
+
+    if (read_failed_) {
         /*
          * Error reading the record.
          *
@@ -175,6 +179,7 @@ void PacketListRecord::dissect(capture_file *cap_file, bool dissect_color)
 
     if (dissect_color) {
         colorized_ = true;
+        color_ver_ = rows_color_ver_;
     }
     data_ver_ = col_data_ver_;
 

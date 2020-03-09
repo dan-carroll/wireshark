@@ -114,6 +114,8 @@ if [ ! -d "$qt_frameworks_dir" ] ; then
 	exit 1
 fi
 
+sparkle_frameworks_dir="@SPARKLE_LIBRARIES@"
+
 #
 # Leave the Qt frameworks out of the special processing.
 #
@@ -135,7 +137,7 @@ pkgplugin="$bundle/Contents/PlugIns/wireshark/@PLUGIN_PATH_ID@"
 #
 secondary_binary_list=$( find $pkgexec \! -name Wireshark -type f -perm -0555 -print | sort )
 plugin_library_list=$( find $pkgplugin -name "*.so" -type f -perm -0555 -print | sort )
-bundle_binary_list="Wireshark $secondary_binary_list $plugin_library_list"
+bundle_binary_list="$pkgexec/Wireshark $secondary_binary_list $plugin_library_list"
 
 echo -e "\\nFixing up $bundle..."
 
@@ -228,6 +230,10 @@ fi
 #
 /usr/bin/install_name_tool -delete_rpath "$qt_frameworks_dir" $pkgexec/Wireshark
 
+if [ -d "$sparkle_frameworks_dir" ] ; then
+	cp -R "$sparkle_frameworks_dir" "$pkglib" || exit 1
+fi
+
 # NOTE: we must rpathify *all* files, *including* Qt libraries etc.,
 #
 rpathify_file () {
@@ -316,7 +322,7 @@ rpathify_file () {
 		# Show the minimum supported version of macOS
 		# for each executable or library
 		#
-		if [[ "$filetype" = "EXECUTE" || "$filetype" = "DYLIB" ]] && [[ "$VERSION" -ge "7" ]] ; then
+		if [[ "$filetype" = "EXECUTE" || "$filetype" = "DYLIB" ]] ; then
 			echo "Minimum macOS version for $1:"
 			otool -l "$1" | grep -A3 LC_VERSION_MIN_MACOSX
 		fi
@@ -458,13 +464,26 @@ codesign_file () {
 	# XXX Do we need to add the com.apple.security.cs.allow-unsigned-executable-memory
 	# entitlement for Lua?
 	# https://developer.apple.com/documentation/security/hardened_runtime_entitlements?language=objc
+
 	codesign \
 		--sign "Developer ID Application: $CODE_SIGN_IDENTITY" \
+		--force \
 		--options runtime \
 		--entitlements "@CMAKE_SOURCE_DIR@/packaging/macosx/entitlements.plist" \
 		--timestamp \
 		--verbose \
 		"$1"
+}
+
+# XXX We could do this via the productbuild calls in the {,un}install_*_pkg
+# targets in CMakeLists.txt instead.
+productsign_pkg () {
+	mv "$1" "$1.unsigned" || exit 1
+	productsign \
+		--sign "Developer ID Installer: $CODE_SIGN_IDENTITY" \
+		--timestamp \
+		"$1.unsigned" "$1" || exit 1
+	rm -f "$1.unsigned" || exit 1
 }
 
 if [ -n "$CODE_SIGN_IDENTITY" ] ; then
@@ -482,6 +501,22 @@ if [ -n "$CODE_SIGN_IDENTITY" ] ; then
 	# temporary adjustments only. Note that signing with the combination --deep
 	# --force will forcibly re-sign all code in a bundle."
 
+	# We need to force-sign Sparkle and its AutoUpdate.app.
+	# https://github.com/sparkle-project/Sparkle/issues/1441
+	# https://github.com/sparkle-project/Sparkle/issues/1266
+	# https://furbo.org/2019/08/16/catalina-app-notarization-and-sparkle/
+	# https://cutecoder.org/programming/enable-hardened-runtime-sparkle/
+
+	echo "Signing Sparkle's AutoUpdate.app"
+	codesign \
+		--sign "Developer ID Application: $CODE_SIGN_IDENTITY" \
+		--force \
+		--deep \
+		--timestamp \
+		--options runtime \
+		--verbose \
+		"$pkglib/Sparkle.framework/Versions/A/Resources/AutoUpdate.app"
+
 	echo "Signing frameworks"
 	for framework in "$pkglib"/*.framework/Versions/* ; do
 		codesign_file "$framework"
@@ -496,6 +531,12 @@ if [ -n "$CODE_SIGN_IDENTITY" ] ; then
 	echo "Signing plugins"
 	for plugin in $plugin_list ; do
 		codesign_file "$plugin"
+	done
+
+	echo "Signing extra packages"
+	find $bundle/Contents/Resources/Extras -type f -name "*.pkg" | \
+	while read -r extra_pkg ; do
+		productsign_pkg "$extra_pkg"
 	done
 
 	echo "Signing secondary executables"
@@ -520,6 +561,13 @@ if [ -n "$CODE_SIGN_IDENTITY" ] ; then
 	spctl --assess --type exec --verbose=2 "$bundle" || exit 1
 else
 	echo "Code signing not performed (no identity)"
+fi
+
+# File permission sanity check.
+if badperms=$( find "$bundle" ! -perm -0444 -exec ls -l "{}" + | grep . ) ; then
+	echo "Found files with restrictive permissions:"
+	echo "$badperms"
+	exit 1
 fi
 
 exit 0

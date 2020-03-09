@@ -658,6 +658,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  follow_iterate_followers@Base 2.1.0
  follow_reset_stream@Base 2.1.0
  follow_tvb_tap_listener@Base 2.1.0
+ format_size_wmem@Base 3.3.0
  format_text@Base 1.9.1
  format_text_chr@Base 1.12.0~rc1
  format_text_wsp@Base 1.9.1
@@ -785,6 +786,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  get_dissector_table_param@Base 1.99.2
  get_dissector_table_selector_type@Base 1.9.1
  get_dissector_table_ui_name@Base 1.9.1
+ get_edited_resolved_name@Base 3.3.0
  get_eo_by_name@Base 2.3.0
  get_eo_packet_func@Base 2.3.0
  get_eo_proto_id@Base 2.3.0
@@ -852,6 +854,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  get_utf_16_string@Base 1.12.0~rc1
  get_vlan_hash_table@Base 2.1.0
  get_wka_hashtable@Base 1.12.0~rc1
+ get_quic_connections_count@Base 3.1.1
  giop_add_CDR_string@Base 3.0.1
  golay_decode@Base 1.9.1
  golay_encode@Base 1.9.1
@@ -898,6 +901,8 @@ libwireshark.so.0 libwireshark0 #MINVER#
  hfinfo_bitshift@Base 1.12.0~rc1
  host_name_lookup_process@Base 1.9.1
  hostlist_table_set_gui_info@Base 1.99.0
+ http2_get_stream_id_ge@Base 3.1.1
+ http2_get_stream_id_le@Base 3.1.1
  http_tcp_dissector_add@Base 2.1.0
  http_tcp_dissector_delete@Base 2.3.0
  http_tcp_port_add@Base 2.1.0
@@ -927,7 +932,6 @@ libwireshark.so.0 libwireshark0 #MINVER#
  list_stat_cmd_args@Base 1.9.1
  llc_add_oui@Base 1.9.1
  make_printable_string@Base 1.9.1
- manually_resolve_cleanup@Base 1.12.0~rc1
  mark_frame_as_depended_upon@Base 1.9.1
  maxmind_db_get_paths@Base 2.5.1
  maxmind_db_lookup_ipv4@Base 2.5.1
@@ -1073,6 +1077,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  prefs_set_gui_theme_is_dark@Base 2.5.0
  prefs_set_module_effect_flags@Base 2.5.0
  prefs_set_pref@Base 1.9.1
+ prefs_set_preference_effect_fields@Base 3.3.0
  prefs_set_range_value@Base 2.1.0
  prefs_set_range_value_work@Base 2.3.0
  prefs_set_stashed_range_value@Base 2.3.0
@@ -1113,6 +1118,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  proto_find_first_finfo@Base 2.3.0
  proto_find_undecoded_data@Base 1.99.3
  proto_free_deregistered_fields@Base 1.12.2
+ proto_free_field_strings@Base 3.1.1
  proto_get_data_protocol@Base 1.9.1
  proto_get_finfo_ptr_array@Base 1.9.1
  proto_get_first_protocol@Base 1.9.1
@@ -1237,14 +1243,19 @@ libwireshark.so.0 libwireshark0 #MINVER#
  proto_tree_add_item_ret_boolean@Base 2.3.0
  proto_tree_add_item_ret_display_string@Base 3.1.0
  proto_tree_add_item_ret_display_string_and_length@Base 3.1.0
+ proto_tree_add_item_ret_int64@Base 3.1.1
  proto_tree_add_item_ret_int@Base 1.99.6
  proto_tree_add_item_ret_length@Base 2.1.0
+ proto_tree_add_item_ret_time_string@Base 3.1.1
  proto_tree_add_item_ret_string@Base 2.1.0
  proto_tree_add_item_ret_string_and_length@Base 2.1.0
  proto_tree_add_item_ret_uint@Base 1.99.6
  proto_tree_add_item_ret_uint64@Base 2.3.0
  proto_tree_add_item_ret_varint@Base 2.5.0
  proto_tree_add_none_format@Base 1.9.1
+ proto_tree_add_oid@Base 3.1.1
+ proto_tree_add_oid_format@Base 3.1.1
+ proto_tree_add_oid_format_value@Base 3.1.1
  proto_tree_add_protocol_format@Base 1.9.1
  proto_tree_add_split_bits_item_ret_val@Base 2.3.0
  proto_tree_add_string@Base 1.9.1
@@ -1471,6 +1482,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  sid_name_table@Base 1.9.1
  signed_time_msecs_to_str@Base 2.1.0
  signed_time_secs_to_str@Base 2.1.0
+ sip_response_code_vals@Base 3.3.0
  smb2_cmd_vals_ext@Base 1.9.1
  smb_cmd_vals_ext@Base 1.9.1
  srt_table_dissector_init@Base 1.99.8
@@ -1646,6 +1658,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  timestamp_set_precision@Base 1.9.1
  timestamp_set_seconds_type@Base 1.9.1
  timestamp_set_type@Base 1.9.1
+ tls_set_appdata_dissector@Base 3.1.1
  tmp_color_filters_used@Base 2.1.0
  trans2_cmd_vals_ext@Base 1.9.1
  tree_expanded@Base 1.12.0~rc1
@@ -1935,6 +1948,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  unsigned_time_secs_to_str@Base 2.1.0
  update_crc10_by_bytes_tvb@Base 1.99.0
  uri_str_to_bytes@Base 1.9.1
+ vals_http_status_code@Base 3.3.0
  val64_string_ext_free@Base 2.9.0
  val64_string_ext_new@Base 2.9.0
  val64_to_str@Base 1.12.0~rc1
@@ -2017,6 +2031,7 @@ libwireshark.so.0 libwireshark0 #MINVER#
  wmem_strbuf_append_c@Base 1.12.0~rc1
  wmem_strbuf_append_printf@Base 1.9.1
  wmem_strbuf_append_unichar@Base 1.12.0~rc1
+ wmem_strbuf_append_vprintf@Base 3.1.1
  wmem_strbuf_finalize@Base 1.12.0~rc1
  wmem_strbuf_get_len@Base 1.9.1
  wmem_strbuf_get_str@Base 1.9.1

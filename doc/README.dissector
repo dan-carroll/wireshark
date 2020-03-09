@@ -97,6 +97,9 @@ PROTOSHORTNAME  An abbreviated name for the protocol; this is displayed
 PROTOABBREV     A name for the protocol for use in filter expressions;
                 it may contain only lower-case letters, digits, and hyphens,
                 underscores, and periods.
+LICENSE         The license this dissector is under. Please use a SPDX License
+                identifier.
+YEARS           The years the above license is valid for.
 FIELDNAME       The displayed name for the header field.
 FIELDABBREV     The abbreviated name for the header field; it may contain
                 only letters, digits, hyphens, underscores, and periods.
@@ -194,6 +197,16 @@ FIELDDESCR      A brief description of the field, or NULL. [Please do not use ""
 If, for example, PROTONAME is "Internet Bogosity Discovery Protocol",
 PROTOSHORTNAME would be "IBDP", and PROTOABBREV would be "ibdp". Try to
 conform with IANA names.
+
+1.2.1 Automatic substitution in code skeleton
+
+Instead of manual substitutions in the code skeleton, a tool to automate it can
+be found under the tools directory. The script is called tools/generate-dissector.py
+and takes all the needed options to generate a compilable dissector. Look at the
+above fields to know how to set them. Some assumptions have been made in the
+generation to shorten the list of required options. The script patches the
+CMakeLists.txt file adding the new dissector in the proper list, alphabetically
+sorted.
 
 1.3 The dissector and the data it receives.
 
@@ -315,6 +328,13 @@ gint64 tvb_get_letohi56(tvbuff_t *tvb, const gint offset);
 
 guint64 tvb_get_letoh64(tvbuff_t *tvb, const gint offset);
 gint64 tvb_get_letohi64(tvbuff_t *tvb, const gint offset);
+
+NOTE: Although each of the integer accessors above return types with
+specific sizes, the returned values are subject to C's integer promotion
+rules. It's often safer and more useful to use int or guint for 32-bit
+and smaller types, and gint64 or guint64 for 40-bit and larger types.
+Just because a value occupied 16 bits on the wire or over the air
+doesn't mean it will within Wireshark.
 
 Single-precision and double-precision IEEE floating-point numbers:
 
@@ -1587,7 +1607,7 @@ protocol or field labels to the proto_tree:
 
     proto_item *
     proto_tree_add_bitmask_len(tree, tvb, start, len, header, ett, fields,
-        encoding);
+        exp, encoding);
 
     proto_item *
     proto_tree_add_bitmask_text(tree, tvb, offset, len, name, fallback,
@@ -2584,7 +2604,7 @@ it is wise to check the relevant header and source files for additional details.
 
 2.2 Following "conversations".
 
-In wireshark a conversation is defined as a series of data packets between two
+In Wireshark a conversation is defined as a series of data packets between two
 address:port combinations. A conversation is not sensitive to the direction of
 the packet. The same conversation will be returned for a packet bound from
 ServerA:1000 to ClientA:2000 and the packet from ClientA:2000 to ServerA:1000.
@@ -2713,10 +2733,11 @@ find_conversation())
 
 The find_conversation_pinfo prototype:
 
-    extern conversation_t *find_conversation_pinfo(packet_info *pinfo);
+    extern conversation_t *find_conversation_pinfo(packet_info *pinfo, const guint options);
 
 Where:
     packet_info *pinfo = the packet_info structure
+    const guint options = conversation options, NO_ADDR_B and/or NO_PORT_B
 
 The frame number and the addresses necessary for find_conversation() are
 taken from the pinfo structure (as is commonly done).
@@ -3010,7 +3031,7 @@ whether it is registered to our protocol or not.
 We should do this because it is uncommon but it does happen that multiple
 different protocols can use the same socketpair during different stages of
 an application cycle. By keeping track of the frame number a conversation
-was started in wireshark can still tell these different protocols apart.
+was started in Wireshark can still tell these different protocols apart.
 
 The second argument to conversation_set_dissector is a dissector handle,
 which is created with a call to create_dissector_handle or
@@ -3096,7 +3117,7 @@ conversation already exists or not and if it exists we also check whether the
 registered dissector_handle for that conversation is "our" dissector or not.
 If not we create a new conversation on top of the previous one and set this new
 conversation to use our protocol.
-Since wireshark keeps track of the frame number where a conversation started
+Since Wireshark keeps track of the frame number where a conversation started
 wireshark will still be able to keep the packets apart even though they do use
 the same socketpair.
         (See packet-tftp.c and packet-snmp.c for examples of this)

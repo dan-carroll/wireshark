@@ -59,6 +59,7 @@ public slots:
 #endif
     void getPoints(int idx, PointList *pts);
     void showRunOnFile();
+    void showContextMenu(QPoint pos);
 
 protected:
     void hideEvent(QHideEvent *evt);
@@ -67,12 +68,13 @@ protected:
 private:
 
     void resetInterfaceTreeDisplay();
+    bool haveLocalCapturePermissions() const;
 
     Ui::InterfaceFrame *ui;
 
-    InterfaceSortFilterModel proxyModel;
-    InterfaceTreeModel sourceModel;
-    InfoProxyModel infoModel;
+    InterfaceSortFilterModel proxy_model_;
+    InterfaceTreeModel source_model_;
+    InfoProxyModel info_model_;
 
     QMap<int, QString> ifTypeDescription;
 
@@ -91,6 +93,7 @@ private slots:
     void updateStatistics(void);
     void actionButton_toggled(bool checked);
     void triggeredIfTypeButton();
+    void on_warningLabel_linkActivated(const QString &link);
 };
 
 #endif // INTERFACE_FRAME_H

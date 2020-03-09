@@ -1,9 +1,9 @@
 /* packet-lte-rrc-template.c
  * Routines for Evolved Universal Terrestrial Radio Access (E-UTRA);
  * Radio Resource Control (RRC) protocol specification
- * (3GPP TS 36.331 V15.6.0 Release 15) packet dissection
+ * (3GPP TS 36.331 V15.8.0 Release 15) packet dissection
  * Copyright 2008, Vincent Helfre
- * Copyright 2009-2019, Pascal Quantin
+ * Copyright 2009-2020, Pascal Quantin
  *
  * Wireshark - Network traffic analyzer
  * By Gerald Combs <gerald@wireshark.org>
@@ -26,6 +26,7 @@
 #include <epan/proto_data.h>
 
 #include <wsutil/str_util.h>
+#include <wsutil/epochs.h>
 
 #include "packet-per.h"
 #include "packet-rrc.h"
@@ -2640,6 +2641,12 @@ static void
 lte_rrc_mbms_MaxBW_r14_fmt(gchar *s, guint32 v)
 {
   g_snprintf(s, ITEM_LABEL_LENGTH, "%u MHz (%u)", 40*v, v);
+}
+
+static void
+lte_rrc_dl_1024QAM_TotalWeightedLayers_r15_fmt(gchar *s, guint32 v)
+{
+  g_snprintf(s, ITEM_LABEL_LENGTH, "%u (%u)", 10+(2*v), v);
 }
 
 static void

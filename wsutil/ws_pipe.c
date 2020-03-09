@@ -135,7 +135,7 @@ ws_pipe_create_overlapped_read(HANDLE *read_pipe_handle, HANDLE *write_pipe_hand
                                 PIPE_TYPE_BYTE | PIPE_WAIT, 1,
                                 suggested_buffer_size, suggested_buffer_size,
                                 0, sa);
-    if (!read_pipe)
+    if (INVALID_HANDLE_VALUE == read_pipe)
     {
         g_free(wname);
         return FALSE;
@@ -314,7 +314,7 @@ gboolean ws_pipe_spawn_sync(const gchar *working_directory, const gchar *command
     info.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     info.wShowWindow = SW_HIDE;
 
-    if (win32_create_process(NULL, command_line, NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, NULL, &info, &processInfo))
+    if (win32_create_process(NULL, command_line, NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, working_directory, &info, &processInfo))
     {
         gchar* stdout_buffer = (gchar*)g_malloc(BUFFER_SIZE);
         gchar* stderr_buffer = (gchar*)g_malloc(BUFFER_SIZE);

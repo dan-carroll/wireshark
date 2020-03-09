@@ -2920,7 +2920,7 @@ dissect_negprot_response(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, in
 			 */
 			proto_tree_add_uint_format_value(tree, hf_smb_dialect_index,
 				tvb, offset, 2, dialect,
-				"-1, PC NETWORK PROGRAM 1.0 chosen");
+				"-1, server does not support any of the listed dialects");
 		} else {
 			/*
 			 * A dialect was selected; this should be
@@ -5983,7 +5983,7 @@ dissect_search_dir_info(tvbuff_t *tvb, packet_info *pinfo,
 
 	DISSECTOR_ASSERT(si);
 
-	tree = proto_tree_add_subtree(parent_tree, tvb, offset, 46,
+	tree = proto_tree_add_subtree(parent_tree, tvb, offset, 43,
 			ett_smb_search_dir_info, NULL, "Directory Information");
 
 	/* resume key */

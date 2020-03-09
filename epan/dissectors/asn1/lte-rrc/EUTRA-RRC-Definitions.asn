@@ -1,4 +1,4 @@
--- 3GPP TS 36.331 V15.6.0 (2019-06)
+-- 3GPP TS 36.331 V15.8.0 (2019-12)
 --
 EUTRA-RRC-Definitions DEFINITIONS AUTOMATIC TAGS ::=
 
@@ -365,8 +365,8 @@ DLInformationTransfer-r15-IEs ::=	SEQUENCE {
 
 
 FailureInformation-r15 ::=		SEQUENCE {
-	failedLogicalChannelInfo-r15	FailedLogicalChannelInfo-r15		OPTIONAL,
-	nonCriticalExtension			SEQUENCE {}
+	failedLogicalChannelInfo-r15	FailedLogicalChannelInfo-r15		OPTIONAL
+	-- nonCriticalExtension is removed in this version as OPTIONAL was missing
 }
 
 FailedLogicalChannelInfo-r15 ::=	SEQUENCE {
@@ -769,7 +769,7 @@ MeasReportAppLayer-r15 ::=		SEQUENCE {
 
 MeasReportAppLayer-r15-IEs ::=		SEQUENCE {
 	measReportAppLayerContainer-r15		OCTET STRING (SIZE(1..8000))			OPTIONAL,
-	serviceType							ENUMERATED {qoe, qoemtsi, spare6, spare5, spare4, spare3, spare2, spare1}		OPTIONAL,
+	serviceType-r15						ENUMERATED {qoe, qoemtsi, spare6, spare5, spare4, spare3, spare2, spare1}		OPTIONAL,
 	nonCriticalExtension				SEQUENCE {}						OPTIONAL
 }
 
@@ -1336,7 +1336,9 @@ SCG-ConfigPartSCG-r12 ::=			SEQUENCE {
 	[[	-- NE-DC addition for setup/ modification and release SN configured measurements
 		measConfigSN-r15				MeasConfig						OPTIONAL,	-- Need ON
 		-- NE-DC additions concerning DRBs/ SRBs are within RadioResourceConfigDedicatedSCG
-		tdm-PatternConfigNE-DC-r15		TDM-PatternConfig-r15			OPTIONAL	-- Need ON
+		tdm-PatternConfigNE-DC-r15		TDM-PatternConfig-r15			OPTIONAL	-- Cond FDD-PSCell
+	]],
+	[[	p-MaxEUTRA-r15					P-Max							OPTIONAL	-- Need ON
 	]]
 }
 
@@ -1368,7 +1370,7 @@ SecurityConfigHO ::=				SEQUENCE {
 SecurityConfigHO-v1530 ::=		SEQUENCE {
 	handoverType-v1530				CHOICE {
 		intra5GC-r15						SEQUENCE {
-			securityAlgorithmConfig-r15			SecurityAlgorithmConfig		OPTIONAL,	-- Cond fullConfig
+			securityAlgorithmConfig-r15			SecurityAlgorithmConfig		OPTIONAL,	-- Cond HO-toEUTRA
 			keyChangeIndicator-r15				BOOLEAN,
 			nextHopChainingCount-r15			NextHopChainingCount,
 			nas-Container-r15					OCTET STRING	OPTIONAL	-- Need ON
@@ -1695,7 +1697,7 @@ RRC-InactiveConfig-r15::=		SEQUENCE {
 	periodic-RNAU-timer-r15			ENUMERATED {min5, min10, min20, min30, min60,
 											min120, min360, min720}		OPTIONAL,	--Need OR
 	nextHopChainingCount-r15		NextHopChainingCount		OPTIONAL,	--Cond INACTIVE
-	nonCriticalExtension			SEQUENCE{}		OPTIONAL
+	dummy							SEQUENCE{}		OPTIONAL
 }
 
 RAN-NotificationAreaInfo-r15	::= CHOICE {
@@ -2104,7 +2106,7 @@ RRCConnectionSetupComplete-v1530-IEs ::= SEQUENCE {
 }
 
 RRCConnectionSetupComplete-v1540-IEs ::= SEQUENCE {
-	gummei-Type-v1540					ENUMERATED {mappedFrom5G}		OPTIONAL,
+	gummei-Type-v1540					ENUMERATED {mappedFrom5G-v1540}	OPTIONAL,
 	guami-Type-r15						ENUMERATED {native, mapped}		OPTIONAL,
 	nonCriticalExtension				SEQUENCE {}						OPTIONAL
 }
@@ -2156,7 +2158,7 @@ RRCEarlyDataRequest-r15 ::=		SEQUENCE {
 
 RRCEarlyDataRequest-r15-IEs ::=	SEQUENCE {
 	s-TMSI-r15						S-TMSI,
-	establishmentCause-r15			ENUMERATED {	mo-Data-r15, delayTolerantAccess-r15},
+	establishmentCause-r15			ENUMERATED {mo-Data, delayTolerantAccess},
 	dedicatedInfoNAS-r15				DedicatedInfoNAS,
 	nonCriticalExtension				SEQUENCE {}			OPTIONAL
 }
@@ -2174,16 +2176,16 @@ SCGFailureInformation-r12 ::=		SEQUENCE {
 
 SCGFailureInformation-r12-IEs ::=	SEQUENCE {
 	failureReportSCG-r12				FailureReportSCG-r12			OPTIONAL,
-	nonCriticalExtension				SCGFailureInformation-v1310-IEs	OPTIONAL
+	nonCriticalExtension				SCGFailureInformation-v12d0a-IEs	OPTIONAL
 }
 
-SCGFailureInformation-v1310-IEs ::= SEQUENCE {
-	lateNonCriticalExtension			OCTET STRING (CONTAINING SCGFailureInformation-v12d0-IEs)						OPTIONAL,
+SCGFailureInformation-v12d0a-IEs ::= SEQUENCE {
+	lateNonCriticalExtension			OCTET STRING (CONTAINING SCGFailureInformation-v12d0b-IEs)						OPTIONAL,
 	nonCriticalExtension				SEQUENCE {}							OPTIONAL
 }
 
 -- Late non-critical extensions:
-SCGFailureInformation-v12d0-IEs ::= SEQUENCE {
+SCGFailureInformation-v12d0b-IEs ::= SEQUENCE {
 	failureReportSCG-v12d0				FailureReportSCG-v12d0				OPTIONAL,	nonCriticalExtension				SEQUENCE {}							OPTIONAL
 }
 
@@ -10923,7 +10925,7 @@ OtherConfig-r9 ::= SEQUENCE	{
 			release					NULL,
 			setup					SEQUENCE{
 				measConfigAppLayerContainer-r15		OCTET STRING (SIZE(1..1000)),
-				serviceType							ENUMERATED {qoe, qoemtsi, spare6, spare5, spare4, spare3, spare2, spare1}
+				serviceType-r15						ENUMERATED {qoe, qoemtsi, spare6, spare5, spare4, spare3, spare2, spare1}
 			}
 		}	OPTIONAL,	-- Need ON	
 		ailc-BitConfig-r15				BOOLEAN							OPTIONAL,	-- Need ON
@@ -11138,15 +11140,15 @@ UE-EUTRA-Capability-v1380-IEs ::= SEQUENCE {
 
 UE-EUTRA-Capability-v1390-IEs ::= SEQUENCE {
 	rf-Parameters-v1390					RF-Parameters-v1390						OPTIONAL,
-	nonCriticalExtension				UE-EUTRA-Capability-v13x0-IEs 			OPTIONAL
+	nonCriticalExtension				UE-EUTRA-Capability-v13e0a-IEs 			OPTIONAL
 }
 
-UE-EUTRA-Capability-v13x0-IEs ::= SEQUENCE {
-	lateNonCriticalExtension			OCTET STRING (CONTAINING UE-EUTRA-Capability-v13e0-IEs)							OPTIONAL,
+UE-EUTRA-Capability-v13e0a-IEs ::= SEQUENCE {
+	lateNonCriticalExtension			OCTET STRING (CONTAINING UE-EUTRA-Capability-v13e0b-IEs)							OPTIONAL,
 	nonCriticalExtension				UE-EUTRA-Capability-v1470-IEs			OPTIONAL
 }
 
-UE-EUTRA-Capability-v13e0-IEs ::= SEQUENCE {
+UE-EUTRA-Capability-v13e0b-IEs ::= SEQUENCE {
 	phyLayerParameters-v13e0			PhyLayerParameters-v13e0,
 	-- Following field is only to be used for late REL-13 extensions
 	nonCriticalExtension				SEQUENCE {}								OPTIONAL
@@ -11439,7 +11441,13 @@ UE-EUTRA-Capability-v1560-IEs ::= SEQUENCE {
 	appliedCapabilityFilterCommon-r15		OCTET STRING							OPTIONAL,
 	fdd-Add-UE-EUTRA-Capabilities-v1560	UE-EUTRA-CapabilityAddXDD-Mode-v1560,
 	tdd-Add-UE-EUTRA-Capabilities-v1560	UE-EUTRA-CapabilityAddXDD-Mode-v1560,
-	nonCriticalExtension					SEQUENCE {}								OPTIONAL
+	nonCriticalExtension					UE-EUTRA-Capability-v1570-IEs			OPTIONAL
+}
+
+UE-EUTRA-Capability-v1570-IEs ::= SEQUENCE {
+	rf-Parameters-v1570				RF-Parameters-v1570					OPTIONAL,
+	irat-ParametersNR-v1570			IRAT-ParametersNR-v1570					OPTIONAL,
+	nonCriticalExtension				SEQUENCE {}								OPTIONAL
 }
 
 UE-EUTRA-CapabilityAddXDD-Mode-r9 ::=	SEQUENCE {
@@ -12127,6 +12135,11 @@ RF-Parameters-v1530 ::=				SEQUENCE {
 	powerClass-14dBm-r15					ENUMERATED {supported}					OPTIONAL
 }
 
+RF-Parameters-v1570 ::=			SEQUENCE {
+	dl-1024QAM-ScalingFactor-r15				ENUMERATED {v1, v1dot2, v1dot25},
+	dl-1024QAM-TotalWeightedLayers-r15		INTEGER (0..10)
+}
+
 SkipSubframeProcessing-r15 ::=		SEQUENCE {
 	skipProcessingDL-Slot-r15			INTEGER (0..3)					OPTIONAL,
 	skipProcessingDL-SubSlot-r15		INTEGER (0..3)					OPTIONAL,
@@ -12689,6 +12702,11 @@ IRAT-ParametersNR-v1540 ::=		SEQUENCE {
 
 IRAT-ParametersNR-v1560 ::=		SEQUENCE {
 	ng-EN-DC-r15 							ENUMERATED {supported}				OPTIONAL
+}
+
+IRAT-ParametersNR-v1570 ::=		SEQUENCE {
+	ss-SINR-Meas-NR-FR1-r15				ENUMERATED {supported}				OPTIONAL,
+	ss-SINR-Meas-NR-FR2-r15				ENUMERATED {supported}				OPTIONAL
 }
 
 EUTRA-5GC-Parameters-r15 ::=		SEQUENCE {

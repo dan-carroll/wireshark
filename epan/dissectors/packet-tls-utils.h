@@ -150,22 +150,26 @@ typedef enum {
 #define SSL_HND_CERT_STATUS_TYPE_OCSP_MULTI  2
 #define SSL_HND_CERT_TYPE_RAW_PUBLIC_KEY     2
 
-#define SSL_HND_QUIC_TP_ORIGINAL_CONNECTION_ID              0
-#define SSL_HND_QUIC_TP_IDLE_TIMEOUT                        1
-#define SSL_HND_QUIC_TP_STATELESS_RESET_TOKEN               2
-#define SSL_HND_QUIC_TP_MAX_PACKET_SIZE                     3
-#define SSL_HND_QUIC_TP_INITIAL_MAX_DATA                    4
-#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL  5
-#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE 6
-#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI         7
-#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAMS_BIDI            8
-#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAMS_UNI             9
-#define SSL_HND_QUIC_TP_ACK_DELAY_EXPONENT                  10
-#define SSL_HND_QUIC_TP_MAX_ACK_DELAY                       11
-#define SSL_HND_QUIC_TP_DISABLE_MIGRATION                   12
-#define SSL_HND_QUIC_TP_PREFERRED_ADDRESS                   13
-#define SSL_HND_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT          14
-
+/* https://github.com/quicwg/base-drafts/wiki/Temporary-IANA-Registry#quic-transport-parameters */
+#define SSL_HND_QUIC_TP_ORIGINAL_CONNECTION_ID              0x00
+#define SSL_HND_QUIC_TP_MAX_IDLE_TIMEOUT                    0x01
+#define SSL_HND_QUIC_TP_STATELESS_RESET_TOKEN               0x02
+#define SSL_HND_QUIC_TP_MAX_PACKET_SIZE                     0x03
+#define SSL_HND_QUIC_TP_INITIAL_MAX_DATA                    0x04
+#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL  0x05
+#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE 0x06
+#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI         0x07
+#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAMS_BIDI            0x08
+#define SSL_HND_QUIC_TP_INITIAL_MAX_STREAMS_UNI             0x09
+#define SSL_HND_QUIC_TP_ACK_DELAY_EXPONENT                  0x0a
+#define SSL_HND_QUIC_TP_MAX_ACK_DELAY                       0x0b
+#define SSL_HND_QUIC_TP_DISABLE_ACTIVE_MIGRATION            0x0c
+#define SSL_HND_QUIC_TP_PREFERRED_ADDRESS                   0x0d
+#define SSL_HND_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT          0x0e
+#define SSL_HND_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE             0x20 /* https://tools.ietf.org/html/draft-pauly-quic-datagram-05 */
+#define SSL_HND_QUIC_TP_LOSS_BITS                           0x1057 /* https://tools.ietf.org/html/draft-ferrieuxhamchaoui-quic-lossbits-03 */
+#define SSL_HND_QUIC_TP_ENABLE_TIME_STAMP                   0x7157 /* https://tools.ietf.org/html/draft-huitema-quic-ts-02 */
+#define SSL_HND_QUIC_TP_MIN_ACK_DELAY                       0xde1a /* https://tools.ietf.org/html/draft-iyengar-quic-delayed-ack-00 */
 /*
  * Lookup tables
  */
@@ -204,7 +208,6 @@ extern const value_string tls13_key_update_request[];
 extern const value_string compress_certificate_algorithm_vals[];
 extern const value_string quic_transport_parameter_id[];
 extern const value_string quic_version_vals[];
-extern const value_string quic_tp_preferred_address_vals[];
 
 /* XXX Should we use GByteArray instead? */
 typedef struct _StringInfo {
@@ -418,6 +421,7 @@ typedef struct _SslSession {
 
     /* The Application layer protocol if known (for STARTTLS support) */
     dissector_handle_t   app_handle;
+    const char          *alpn_name;
     guint32              last_nontls_frame;
     gboolean             is_session_resumed;
 
@@ -501,6 +505,8 @@ typedef struct {
 
 gint ssl_get_keyex_alg(gint cipher);
 
+void quic_transport_parameter_id_base_custom(gchar *result, guint64 parameter_id);
+
 gboolean ssldecrypt_uat_fld_ip_chk_cb(void*, const char*, unsigned, const void*, const void*, char** err);
 gboolean ssldecrypt_uat_fld_port_chk_cb(void*, const char*, unsigned, const void*, const void*, char** err);
 gboolean ssldecrypt_uat_fld_fileopen_chk_cb(void*, const char*, unsigned, const void*, const void*, char** err);
@@ -509,38 +515,49 @@ gchar* ssl_association_info(const char* dissector_table_name, const char* table_
 
 /** Retrieve a SslSession, creating it if it did not already exist.
  * @param conversation The SSL conversation.
- * @param ssl_handle The dissector handle for SSL or DTLS.
+ * @param tls_handle The dissector handle for SSL or DTLS.
  */
 extern SslDecryptSession *
-ssl_get_session(conversation_t *conversation, dissector_handle_t ssl_handle);
+ssl_get_session(conversation_t *conversation, dissector_handle_t tls_handle);
 
 /** Set server address and port */
 extern void
 ssl_set_server(SslSession *session, address *addr, port_type ptype, guint32 port);
 
-/** Marks this packet as the last one before switching to SSL that is supposed
- * to encapsulate this protocol.
- * @param ssl_handle The dissector handle for SSL or DTLS.
+/** Sets the application data protocol dissector. Intended to be called by
+ * protocols that encapsulate TLS instead of switching to it using STARTTLS.
+ * @param tls_handle The dissector handle for TLS or DTLS.
  * @param pinfo Packet Info.
  * @param app_handle Dissector handle for the protocol inside the decrypted
  * Application Data record.
- * @return 0 for the first STARTTLS acknowledgement (success) or if ssl_handle
+ */
+WS_DLL_PUBLIC void
+tls_set_appdata_dissector(dissector_handle_t tls_handle, packet_info *pinfo,
+                 dissector_handle_t app_handle);
+
+/** Marks this packet as the last one before switching to SSL that is supposed
+ * to encapsulate this protocol.
+ * @param tls_handle The dissector handle for SSL or DTLS.
+ * @param pinfo Packet Info.
+ * @param app_handle Dissector handle for the protocol inside the decrypted
+ * Application Data record.
+ * @return 0 for the first STARTTLS acknowledgement (success) or if tls_handle
  * is NULL. >0 if STARTTLS was started before.
  */
 WS_DLL_PUBLIC guint32
-ssl_starttls_ack(dissector_handle_t ssl_handle, packet_info *pinfo,
+ssl_starttls_ack(dissector_handle_t tls_handle, packet_info *pinfo,
                  dissector_handle_t app_handle);
 
 /** Marks this packet as belonging to an SSL conversation started with STARTTLS.
- * @param ssl_handle The dissector handle for SSL or DTLS.
+ * @param tls_handle The dissector handle for SSL or DTLS.
  * @param pinfo Packet Info.
  * @param app_handle Dissector handle for the protocol inside the decrypted
  * Application Data record.
- * @return 0 for the first STARTTLS acknowledgement (success) or if ssl_handle
+ * @return 0 for the first STARTTLS acknowledgement (success) or if tls_handle
  * is NULL. >0 if STARTTLS was started before.
  */
 WS_DLL_PUBLIC guint32
-ssl_starttls_post_ack(dissector_handle_t ssl_handle, packet_info *pinfo,
+ssl_starttls_post_ack(dissector_handle_t tls_handle, packet_info *pinfo,
                  dissector_handle_t app_handle);
 
 extern dissector_handle_t
@@ -822,6 +839,7 @@ typedef struct ssl_common_dissect {
         gint hs_cert_type;
         gint hs_dnames_len;
         gint hs_dnames;
+        gint hs_dnames_truncated;
         gint hs_dname_len;
         gint hs_dname;
         gint hs_random;
@@ -882,9 +900,10 @@ typedef struct ssl_common_dissect {
         gint hs_ext_quictp_parameter;
         gint hs_ext_quictp_parameter_type;
         gint hs_ext_quictp_parameter_len;
+        gint hs_ext_quictp_parameter_len_old;
         gint hs_ext_quictp_parameter_value;
         gint hs_ext_quictp_parameter_ocid;
-        gint hs_ext_quictp_parameter_idle_timeout;
+        gint hs_ext_quictp_parameter_max_idle_timeout;
         gint hs_ext_quictp_parameter_stateless_reset_token;
         gint hs_ext_quictp_parameter_initial_max_data;
         gint hs_ext_quictp_parameter_initial_max_stream_data_bidi_local;
@@ -895,8 +914,6 @@ typedef struct ssl_common_dissect {
         gint hs_ext_quictp_parameter_ack_delay_exponent;
         gint hs_ext_quictp_parameter_max_ack_delay;
         gint hs_ext_quictp_parameter_max_packet_size;
-        gint hs_ext_quictp_parameter_pa_ipversion;          // Remove in draft -18
-        gint hs_ext_quictp_parameter_pa_ipaddress_length;   // Remove in draft -18
         gint hs_ext_quictp_parameter_pa_ipv4address;
         gint hs_ext_quictp_parameter_pa_ipv6address;
         gint hs_ext_quictp_parameter_pa_ipv4port;
@@ -905,6 +922,9 @@ typedef struct ssl_common_dissect {
         gint hs_ext_quictp_parameter_pa_connectionid;
         gint hs_ext_quictp_parameter_pa_statelessresettoken;
         gint hs_ext_quictp_parameter_active_connection_id_limit;
+        gint hs_ext_quictp_parameter_max_datagram_frame_size;
+        gint hs_ext_quictp_parameter_loss_bits;
+        gint hs_ext_quictp_parameter_min_ack_delay;
 
         gint esni_suite;
         gint esni_record_digest_length;
@@ -1133,7 +1153,7 @@ ssl_common_dissect_t name = {   \
         -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, \
         -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, \
         -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, \
-        -1, -1, -1, -1, -1,                                             \
+        -1, -1, -1, -1, -1, -1, -1, -1,                                 \
     },                                                                  \
     /* ett */ {                                                         \
         -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, \
@@ -1647,6 +1667,11 @@ ssl_common_dissect_t name = {   \
         FT_UINT16, BASE_DEC, NULL, 0x0,                                 \
         "Length of distinguished name", HFILL }                         \
     },                                                                  \
+    { & name .hf.hs_dnames_truncated,                                   \
+      { "Tree view truncated", prefix ".handshake.dnames_truncated",    \
+         FT_NONE, BASE_NONE, NULL, 0x00,                                \
+         "Some Distinguished Names are not added to tree pane to limit resources", HFILL } \
+    },                                                                  \
     { & name .hf.hs_dname,                                              \
       { "Distinguished Name", prefix ".handshake.dname",                \
         FT_NONE, BASE_NONE, NULL, 0x0,                                  \
@@ -1901,10 +1926,15 @@ ssl_common_dissect_t name = {   \
     },                                                                  \
     { & name .hf.hs_ext_quictp_parameter_type,                          \
       { "Type", prefix ".quic.parameter.type",                          \
-        FT_UINT16, BASE_HEX, VALS(quic_transport_parameter_id), 0x00,   \
+        FT_UINT64, BASE_CUSTOM, CF_FUNC(quic_transport_parameter_id_base_custom), 0x00,    \
         NULL, HFILL }                                                   \
     },                                                                  \
     { & name .hf.hs_ext_quictp_parameter_len,                           \
+      { "Length", prefix ".quic.parameter.length",                      \
+        FT_UINT64, BASE_DEC, NULL, 0x00,                                \
+        NULL, HFILL }                                                   \
+    },                                                                  \
+    { & name .hf.hs_ext_quictp_parameter_len_old,                       \
       { "Length", prefix ".quic.parameter.length",                      \
         FT_UINT16, BASE_DEC, NULL, 0x00,                                \
         NULL, HFILL }                                                   \
@@ -1919,8 +1949,8 @@ ssl_common_dissect_t name = {   \
         FT_BYTES, BASE_NONE, NULL, 0x00,                                \
         "The value of the Destination Connection ID field from the first Initial packet sent by the client", HFILL } \
     },                                                                  \
-    { & name .hf.hs_ext_quictp_parameter_idle_timeout,                  \
-      { "idle_timeout", prefix ".quic.parameter.idle_timeout",          \
+    { & name .hf.hs_ext_quictp_parameter_max_idle_timeout,              \
+      { "max_idle_timeout", prefix ".quic.parameter.max_idle_timeout",  \
         FT_UINT64, BASE_DEC, NULL, 0x00,                                \
         "In milliseconds", HFILL }                                      \
     },                                                                  \
@@ -1974,16 +2004,6 @@ ssl_common_dissect_t name = {   \
         FT_UINT64, BASE_DEC, NULL, 0x00,                                \
         "Indicating the maximum amount of time in milliseconds by which it will delay sending of acknowledgments", HFILL } \
     },                                                                  \
-    { & name .hf.hs_ext_quictp_parameter_pa_ipversion,                  \
-      { "ipVersion", prefix ".quic.parameter.preferred_address.ipversion",  \
-        FT_UINT8, BASE_DEC, VALS(quic_tp_preferred_address_vals), 0x00, \
-        "IP Version (until draft -17)", HFILL }                         \
-    },                                                                  \
-    { & name .hf.hs_ext_quictp_parameter_pa_ipaddress_length,           \
-      { "Length", prefix ".quic.parameter.preferred_address.ipaddress.length",  \
-        FT_UINT8, BASE_DEC, NULL, 0x00,                                 \
-        "Length of ipAddress field (until draft -17)", HFILL }          \
-    },                                                                  \
     { & name .hf.hs_ext_quictp_parameter_pa_ipv4address,                \
       { "ipv4Address", prefix ".quic.parameter.preferred_address.ipv4address",  \
         FT_IPv4, BASE_NONE, NULL, 0x00,                                 \
@@ -2021,6 +2041,21 @@ ssl_common_dissect_t name = {   \
     },                                                                  \
     { & name .hf.hs_ext_quictp_parameter_active_connection_id_limit,    \
       { "Active Connection ID Limit", prefix ".quic.parameter.active_connection_id_limit", \
+        FT_UINT64, BASE_DEC, NULL, 0x00,                                \
+        NULL, HFILL }                                                   \
+    },                                                                  \
+    { & name .hf.hs_ext_quictp_parameter_max_datagram_frame_size,       \
+      { "max_datagram_frame_size", prefix ".quic.parameter.max_datagram_frame_size", \
+        FT_UINT64, BASE_DEC, NULL, 0x00,                                \
+        NULL, HFILL }                                                   \
+    },                                                                  \
+    { & name .hf.hs_ext_quictp_parameter_loss_bits,                     \
+      { "loss_bits", prefix ".quic.parameter.loss_bits",                \
+        FT_UINT8, BASE_DEC, NULL, 0x00,                                 \
+        NULL, HFILL }                                                   \
+    },                                                                  \
+    { & name .hf.hs_ext_quictp_parameter_min_ack_delay,                 \
+      { "min_ack_delay", prefix ".quic.parameter.min_ack_delay",        \
         FT_UINT64, BASE_DEC, NULL, 0x00,                                \
         NULL, HFILL }                                                   \
     },                                                                  \

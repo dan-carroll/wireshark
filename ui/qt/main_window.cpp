@@ -18,7 +18,7 @@ DIAG_OFF(frame-larger-than=)
 DIAG_ON(frame-larger-than=)
 
 #include <epan/addr_resolv.h>
-#include "epan/dissector_filters.h"
+#include "epan/conversation_filter.h"
 #include <epan/epan_dissect.h>
 #include <wsutil/filesystem.h>
 #include <version_info.h>
@@ -47,7 +47,7 @@ DIAG_ON(frame-larger-than=)
 
 #include "byte_view_tab.h"
 #ifdef HAVE_LIBPCAP
-#include "capture_interfaces_dialog.h"
+#include "capture_options_dialog.h"
 #endif
 #include "conversation_colorize_action.h"
 #include "export_dissection_dialog.h"
@@ -206,9 +206,14 @@ static void plugin_if_mainwindow_get_ws_info(GHashTable * data_set)
     if (cf) {
         ws_info->cf_count = cf->count;
 
-        if (cf->state == FILE_READ_DONE && cf->current_frame) {
-            ws_info->cf_framenr = cf->current_frame->num;
-            ws_info->frame_passed_dfilter = (cf->current_frame->passed_dfilter == 1);
+        QList<int> rows = gbl_cur_main_window_->selectedRows();
+        frame_data * fdata = NULL;
+        if (rows.count() > 0)
+            fdata = gbl_cur_main_window_->frameDataForRow(rows.at(0));
+
+        if (cf->state == FILE_READ_DONE && fdata) {
+            ws_info->cf_framenr = fdata->num;
+            ws_info->frame_passed_dfilter = (fdata->passed_dfilter == 1);
         }
         else {
             ws_info->cf_framenr = 0;
@@ -283,10 +288,9 @@ MainWindow::MainWindow(QWidget *parent) :
     capture_stopping_(false),
     capture_filter_valid_(false)
 #ifdef HAVE_LIBPCAP
-    , capture_interfaces_dialog_(NULL)
+    , capture_options_dialog_(NULL)
     , info_data_()
 #endif
-    , pdlg_(NULL)
     , display_filter_dlg_(NULL)
     , capture_filter_dlg_(NULL)
 #ifdef _WIN32
@@ -365,7 +369,7 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(wsApp, SIGNAL(updateRecentCaptureStatus(const QString &, qint64, bool)), this, SLOT(updateRecentCaptures()));
     updateRecentCaptures();
 
-#ifdef HAVE_SOFTWARE_UPDATE
+#if defined(HAVE_SOFTWARE_UPDATE) && defined(Q_OS_WIN)
     connect(wsApp, SIGNAL(softwareUpdateRequested()), this, SLOT(softwareUpdateRequested()),
         Qt::BlockingQueuedConnection);
     connect(wsApp, SIGNAL(softwareUpdateClose()), this, SLOT(close()),
@@ -373,22 +377,11 @@ MainWindow::MainWindow(QWidget *parent) :
 #endif
 
     df_combo_box_ = new DisplayFilterCombo(this);
-    const DisplayFilterEdit *df_edit = qobject_cast<DisplayFilterEdit *>(df_combo_box_->lineEdit());
-    connect(df_edit, SIGNAL(pushFilterSyntaxStatus(const QString&)),
-            main_ui_->statusBar, SLOT(pushFilterStatus(const QString&)));
-    connect(df_edit, SIGNAL(popFilterSyntaxStatus()), main_ui_->statusBar, SLOT(popFilterStatus()));
-    connect(df_edit, SIGNAL(filterPackets(QString, bool)), this, SLOT(filterPackets(QString, bool)));
-    connect(df_edit, SIGNAL(showPreferencesDialog(QString)),
-            this, SLOT(showPreferencesDialog(QString)));
-    connect(wsApp, SIGNAL(preferencesChanged()), df_edit, SLOT(checkFilter()));
 
     funnel_statistics_ = new FunnelStatistics(this, capture_file_);
-    connect(df_edit, SIGNAL(textChanged(QString)), funnel_statistics_, SLOT(displayFilterTextChanged(QString)));
-    connect(funnel_statistics_, SIGNAL(setDisplayFilter(QString)), df_edit, SLOT(setText(QString)));
-    connect(funnel_statistics_, SIGNAL(applyDisplayFilter()), df_combo_box_, SLOT(applyDisplayFilter()));
+    connect(funnel_statistics_, &FunnelStatistics::setDisplayFilter, this, &MainWindow::setDisplayFilter);
     connect(funnel_statistics_, SIGNAL(openCaptureFile(QString, QString)),
             this, SLOT(openCaptureFile(QString, QString)));
-    connect(this, SIGNAL(displayFilterSuccess(bool)), df_edit, SLOT(displayFilterSuccess(bool)));
 
     file_set_dialog_ = new FileSetDialog(this);
     connect(file_set_dialog_, SIGNAL(fileSetOpenCaptureFile(QString)),
@@ -396,7 +389,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
     initMainToolbarIcons();
 
-    main_ui_->displayFilterToolBar->insertWidget(main_ui_->actionDisplayFilterExpression, df_combo_box_);
+    main_ui_->displayFilterToolBar->insertWidget(main_ui_->actionNewDisplayFilterExpression, df_combo_box_);
 
     // Make sure filter expressions overflow into a menu instead of a
     // larger toolbar. We do this by adding them to a child toolbar.
@@ -409,8 +402,6 @@ MainWindow::MainWindow(QWidget *parent) :
     main_ui_->displayFilterToolBar->addWidget(filter_expression_toolbar_);
 
 #if defined(HAVE_LIBNL) && defined(HAVE_NL80211)
-    connect(wireless_frame_, SIGNAL(pushAdapterStatus(const QString&)),
-            main_ui_->statusBar, SLOT(pushTemporaryStatus(const QString&)));
     connect(wireless_frame_, SIGNAL(showWirelessPreferences(QString)),
             this, SLOT(showPreferencesDialog(QString)));
 #endif
@@ -423,21 +414,13 @@ MainWindow::MainWindow(QWidget *parent) :
     // https://bugreports.qt-project.org/browse/QTBUG-7174
 
     main_ui_->searchFrame->hide();
-    connect(main_ui_->searchFrame, SIGNAL(pushFilterSyntaxStatus(const QString&)),
-            main_ui_->statusBar, SLOT(pushTemporaryStatus(const QString&)));
     connect(main_ui_->searchFrame, SIGNAL(visibilityChanged(bool)),
             main_ui_->actionEditFindPacket, SLOT(setChecked(bool)));
 
     main_ui_->addressEditorFrame->hide();
     main_ui_->columnEditorFrame->hide();
-    connect(main_ui_->columnEditorFrame, SIGNAL(pushFilterSyntaxStatus(const QString&)),
-            main_ui_->statusBar, SLOT(pushTemporaryStatus(const QString&)));
     main_ui_->preferenceEditorFrame->hide();
-    connect(main_ui_->preferenceEditorFrame, SIGNAL(pushFilterSyntaxStatus(const QString&)),
-            main_ui_->statusBar, SLOT(pushTemporaryStatus(const QString&)));
     main_ui_->filterExpressionFrame->hide();
-    connect(main_ui_->filterExpressionFrame, SIGNAL(pushFilterSyntaxStatus(const QString&)),
-            main_ui_->statusBar, SLOT(pushTemporaryStatus(const QString&)));
 
 #ifndef HAVE_LIBPCAP
     main_ui_->menuCapture->setEnabled(false);
@@ -477,13 +460,12 @@ MainWindow::MainWindow(QWidget *parent) :
     main_ui_->mainStack->addWidget(&master_split_);
 
     empty_pane_.setObjectName("emptyPane");
+    empty_pane_.setVisible(false);
 
     packet_list_ = new PacketList(&master_split_);
     main_ui_->wirelessTimelineWidget->setPacketList(packet_list_);
-    connect(packet_list_, SIGNAL(frameSelected(int)),
-            this, SIGNAL(frameSelected(int)));
-    connect(this, SIGNAL(frameSelected(int)),
-            this, SLOT(setMenusForSelectedPacket()));
+    connect(packet_list_, SIGNAL(framesSelected(QList<int>)), this, SLOT(setMenusForSelectedPacket()));
+    connect(packet_list_, SIGNAL(framesSelected(QList<int>)), this, SIGNAL(framesSelected(QList<int>)));
 
     proto_tree_ = new ProtoTree(&master_split_);
     proto_tree_->installEventFilter(this);
@@ -495,8 +477,6 @@ MainWindow::MainWindow(QWidget *parent) :
 
     connect(proto_tree_, SIGNAL(fieldSelected(FieldInformation *)),
             this, SIGNAL(fieldSelected(FieldInformation *)));
-    connect(this, SIGNAL(fieldSelected(FieldInformation *)),
-            proto_tree_, SLOT(selectedFieldChanged(FieldInformation *)));
     connect(packet_list_, SIGNAL(fieldSelected(FieldInformation *)),
             this, SIGNAL(fieldSelected(FieldInformation *)));
     connect(this, SIGNAL(fieldSelected(FieldInformation *)),
@@ -557,23 +537,17 @@ MainWindow::MainWindow(QWidget *parent) :
             this, SLOT(startCapture()));
     connect(welcome_page_, SIGNAL(recentFileActivated(QString)),
             this, SLOT(openCaptureFile(QString)));
-    connect(welcome_page_, SIGNAL(pushFilterSyntaxStatus(const QString&)),
-            main_ui_->statusBar, SLOT(pushFilterStatus(const QString&)));
-    connect(welcome_page_, SIGNAL(popFilterSyntaxStatus()),
-            main_ui_->statusBar, SLOT(popFilterStatus()));
 
-    connect(main_ui_->addressEditorFrame, SIGNAL(editAddressStatus(QString)),
-            main_ui_->statusBar, SLOT(pushTemporaryStatus(QString)));
-    connect(main_ui_->addressEditorFrame, SIGNAL(redissectPackets()),
-            this, SLOT(redissectPackets()));
-    connect(main_ui_->addressEditorFrame, SIGNAL(showNameResolutionPreferences(QString)),
-            this, SLOT(showPreferencesDialog(QString)));
-    connect(main_ui_->preferenceEditorFrame, SIGNAL(showProtocolPreferences(QString)),
-            this, SLOT(showPreferencesDialog(QString)));
-    connect(main_ui_->filterExpressionFrame, SIGNAL(showPreferencesDialog(QString)),
-            this, SLOT(showPreferencesDialog(QString)));
-    connect(main_ui_->filterExpressionFrame, SIGNAL(filterExpressionsChanged()),
-            filter_expression_toolbar_, SLOT(filterExpressionsChanged()));
+    connect(main_ui_->addressEditorFrame, &AddressEditorFrame::redissectPackets,
+            this, &MainWindow::redissectPackets);
+    connect(main_ui_->addressEditorFrame, &AddressEditorFrame::showNameResolutionPreferences,
+            this, &MainWindow::showPreferencesDialog);
+    connect(main_ui_->preferenceEditorFrame, &PreferenceEditorFrame::showProtocolPreferences,
+            this, &MainWindow::showPreferencesDialog);
+    connect(main_ui_->filterExpressionFrame, &FilterExpressionFrame::showPreferencesDialog,
+            this, &MainWindow::showPreferencesDialog);
+    connect(main_ui_->filterExpressionFrame, &FilterExpressionFrame::filterExpressionsChanged,
+            filter_expression_toolbar_, &FilterExpressionToolBar::filterExpressionsChanged);
 
     /* Connect change of capture file */
     connect(this, SIGNAL(setCaptureFile(capture_file*)),
@@ -584,10 +558,6 @@ MainWindow::MainWindow(QWidget *parent) :
             packet_list_, SLOT(setCaptureFile(capture_file*)));
     connect(this, SIGNAL(setCaptureFile(capture_file*)),
             proto_tree_, SLOT(setCaptureFile(capture_file*)));
-    connect(this, SIGNAL(frameSelected(int)),
-            main_ui_->wirelessTimelineWidget, SLOT(selectedFrameChanged(int)));
-    connect(this, SIGNAL(frameSelected(int)),
-            main_ui_->statusBar, SLOT(selectedFrameChanged(int)));
 
     connect(wsApp, SIGNAL(zoomMonospaceFont(QFont)),
             packet_list_, SLOT(setMonospaceFont(QFont)));
@@ -616,8 +586,6 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(main_ui_->actionViewCollapseAll, SIGNAL(triggered()),
             proto_tree_, SLOT(collapseAll()));
 
-    connect(packet_list_, SIGNAL(frameSelected(int)),
-            this, SIGNAL(frameSelected(int)));
     connect(packet_list_, SIGNAL(packetDissectionChanged()),
             this, SLOT(redissectPackets()));
     connect(packet_list_, SIGNAL(showColumnPreferences(QString)),
@@ -649,6 +617,11 @@ MainWindow::MainWindow(QWidget *parent) :
 
     connect(main_ui_->statusBar, SIGNAL(editCaptureComment()),
             this, SLOT(on_actionStatisticsCaptureFileProperties_triggered()));
+
+    connect(main_ui_->menuApplyAsFilter, &QMenu::aboutToShow,
+            this, &MainWindow::filterMenuAboutToShow);
+    connect(main_ui_->menuPrepareAFilter, &QMenu::aboutToShow,
+            this, &MainWindow::filterMenuAboutToShow);
 
 #ifdef HAVE_LIBPCAP
     QTreeWidget *iface_tree = findChild<QTreeWidget *>("interfaceTree");
@@ -694,7 +667,7 @@ MainWindow::~MainWindow()
     delete capture_filter_dlg_;
     delete display_filter_dlg_;
 #ifdef HAVE_LIBPCAP
-    delete capture_interfaces_dialog_;
+    delete capture_options_dialog_;
 #endif
 
 #endif
@@ -925,9 +898,8 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     }
 
 #ifdef HAVE_LIBPCAP
-    if (capture_interfaces_dialog_) capture_interfaces_dialog_->close();
+    if (capture_options_dialog_) capture_options_dialog_->close();
 #endif
-    if (pdlg_) pdlg_->close();
     // Make sure we kill any open dumpcap processes.
     delete welcome_page_;
 
@@ -952,11 +924,17 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 // order to set DROPDESCRIPTION.
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
 {
+    if (!event->mimeData()->hasUrls())
+    {
+        event->ignore();
+        return;
+    }
+
     if (!main_ui_->actionFileOpen->isEnabled()) {
         // We could alternatively call setAcceptDrops(!capture_in_progress)
         // in setMenusForCaptureInProgress but that wouldn't provide feedback.
 
-        main_ui_->statusBar->pushTemporaryStatus(tr("Unable to drop files during capture."));
+        wsApp->pushStatus(WiresharkApplication::TemporaryStatus, tr("Unable to drop files during capture."));
         event->setDropAction(Qt::IgnoreAction);
         event->ignore();
         return;
@@ -977,6 +955,12 @@ void MainWindow::dragEnterEvent(QDragEnterEvent *event)
 
 void MainWindow::dropEvent(QDropEvent *event)
 {
+    if (!event->mimeData()->hasUrls())
+    {
+        event->ignore();
+        return;
+    }
+
     QList<QByteArray> local_files;
     int max_dropped_files = 100; // Arbitrary
 
@@ -1004,11 +988,11 @@ void MainWindow::dropEvent(QDropEvent *event)
         return;
     }
 
-    char **in_filenames = (char **)g_malloc(sizeof(char*) * local_files.size());
+    const char **in_filenames = g_new(const char *, local_files.size());
     char *tmpname = NULL;
 
     for (int i = 0; i < local_files.size(); i++) {
-        in_filenames[i] = const_cast<char *>(local_files.at(i).constData());
+        in_filenames[i] = local_files.at(i).constData();
     }
 
     /* merge the files in chronological order */
@@ -1022,7 +1006,6 @@ void MainWindow::dropEvent(QDropEvent *event)
 
     g_free(tmpname);
     g_free(in_filenames);
-
 }
 
 // Apply recent settings to the main window geometry.
@@ -1499,7 +1482,7 @@ void MainWindow::exportSelectedPackets() {
     packet_range_t range;
     cf_write_status_t status;
     gchar   *dirname;
-    gboolean discard_comments = FALSE;
+    bool discard_comments = false;
 
     if (!capture_file_.capFile())
         return;
@@ -1509,13 +1492,20 @@ void MainWindow::exportSelectedPackets() {
     range.process_filtered = TRUE;
     range.include_dependents = TRUE;
 
+    QList<int> rows = packet_list_->selectedRows(true);
+
+    QStringList entries;
+    foreach (int row, rows)
+        entries << QString::number(row);
+    QString selRange = entries.join(",");
+
     for (;;) {
         CaptureFileDialog esp_dlg(this, capture_file_.capFile());
 
         /* If the file has comments, does the format the user selected
            support them?  If not, ask the user whether they want to
            discard the comments or choose a different format. */
-        switch (esp_dlg.exportSelectedPackets(file_name, &range)) {
+        switch (esp_dlg.exportSelectedPackets(file_name, &range, selRange)) {
 
         case SAVE:
             /* The file can be saved in the specified format as is;
@@ -1620,8 +1610,17 @@ void MainWindow::exportDissections(export_type_e export_type) {
     capture_file *cf = capture_file_.capFile();
     g_return_if_fail(cf);
 
-    ExportDissectionDialog ed_dlg(this, cf, export_type);
-    ed_dlg.exec();
+    QList<int> rows = packet_list_->selectedRows(true);
+
+    QStringList entries;
+    foreach (int row, rows)
+        entries << QString::number(row);
+    QString selRange = entries.join(",");
+
+    ExportDissectionDialog *ed_dlg = new ExportDissectionDialog(this, cf, export_type, selRange);
+    ed_dlg->setWindowModality(Qt::ApplicationModal);
+    ed_dlg->setAttribute(Qt::WA_DeleteOnClose);
+    ed_dlg->show();
 }
 
 #ifdef Q_OS_WIN
@@ -2027,7 +2026,6 @@ void MainWindow::initShowHideMainWidgets()
     foreach(QAction *shmwa, shmw_actions.keys()) {
         shmwa->setData(QVariant::fromValue(shmw_actions[shmwa]));
         show_hide_actions_->addAction(shmwa);
-        showHideMainWidgets(shmwa);
     }
 
     // Initial hide the Interface Toolbar submenu
@@ -2122,9 +2120,9 @@ void MainWindow::initConversationMenus()
             << main_ui_->actionViewColorizeConversation7 << main_ui_->actionViewColorizeConversation8
             << main_ui_->actionViewColorizeConversation9 << main_ui_->actionViewColorizeConversation10;
 
-    for (GList *conv_filter_list_entry = conv_filter_list; conv_filter_list_entry; conv_filter_list_entry = g_list_next(conv_filter_list_entry)) {
+    for (GList *conv_filter_list_entry = conv_filter_list; conv_filter_list_entry; conv_filter_list_entry = gxx_list_next(conv_filter_list_entry)) {
         // Main menu items
-        conversation_filter_t* conv_filter = (conversation_filter_t *)conv_filter_list_entry->data;
+        conversation_filter_t* conv_filter = gxx_list_data(conversation_filter_t *, conv_filter_list_entry);
         ConversationAction *conv_action = new ConversationAction(main_ui_->menuConversationFilter, conv_filter);
         main_ui_->menuConversationFilter->addAction(conv_action);
 
@@ -2499,7 +2497,7 @@ void MainWindow::changeEvent(QEvent* event)
 }
 
 /* Update main window items based on whether there's a capture in progress. */
-void MainWindow::setForCaptureInProgress(bool capture_in_progress, GArray *ifaces)
+void MainWindow::setForCaptureInProgress(bool capture_in_progress, bool handle_toolbars, GArray *ifaces)
 {
     setMenusForCaptureInProgress(capture_in_progress);
 
@@ -2514,12 +2512,14 @@ void MainWindow::setForCaptureInProgress(bool capture_in_progress, GArray *iface
 //    set_capture_if_dialog_for_capture_in_progress(capture_in_progress);
 #endif
 
-    QList<InterfaceToolbar *> toolbars = findChildren<InterfaceToolbar *>();
-    foreach(InterfaceToolbar *toolbar, toolbars) {
-        if (capture_in_progress) {
-            toolbar->startCapture(ifaces);
-        } else {
-            toolbar->stopCapture();
+    if (handle_toolbars) {
+        QList<InterfaceToolbar *> toolbars = findChildren<InterfaceToolbar *>();
+        foreach(InterfaceToolbar *toolbar, toolbars) {
+            if (capture_in_progress) {
+                toolbar->startCapture(ifaces);
+            } else {
+                toolbar->stopCapture();
+            }
         }
     }
 }
@@ -2701,20 +2701,20 @@ void MainWindow::reloadDynamicMenus()
 
 void MainWindow::externalMenuHelper(ext_menu_t * menu, QMenu  * subMenu, gint depth)
 {
-    QAction * itemAction = NULL;
-    ext_menubar_t * item = NULL;
-    GList * children = NULL;
+    QAction * itemAction = Q_NULLPTR;
+    ext_menubar_t * item = Q_NULLPTR;
+    GList * children = Q_NULLPTR;
 
     /* There must exists an xpath parent */
-    g_assert(subMenu != NULL);
+    Q_ASSERT(subMenu != NULL);
 
     /* If the depth counter exceeds, something must have gone wrong */
-    g_assert(depth < EXT_MENUBAR_MAX_DEPTH);
+    Q_ASSERT(depth < EXT_MENUBAR_MAX_DEPTH);
 
     children = menu->children;
     /* Iterate the child entries */
     while (children && children->data) {
-        item = (ext_menubar_t *)children->data;
+        item = gxx_list_data(ext_menubar_t *, children);
 
         if (item->type == EXT_MENUBAR_MENU) {
             /* Handle Submenu entry */
@@ -2723,14 +2723,14 @@ void MainWindow::externalMenuHelper(ext_menu_t * menu, QMenu  * subMenu, gint de
             subMenu->addSeparator();
         } else if (item->type == EXT_MENUBAR_ITEM || item->type == EXT_MENUBAR_URL) {
             itemAction = subMenu->addAction(item->name);
-            itemAction->setData(QVariant::fromValue((void *)item));
+            itemAction->setData(QVariant::fromValue(static_cast<void *>(item)));
             itemAction->setText(item->label);
             connect(itemAction, SIGNAL(triggered()),
                     this, SLOT(externalMenuItem_triggered()));
         }
 
         /* Iterate Loop */
-        children = g_list_next(children);
+        children = gxx_list_next(children);
     }
 }
 
@@ -2756,13 +2756,13 @@ void MainWindow::addPluginIFStructures()
     GList *user_menu = ext_menubar_get_entries();
 
     while (user_menu && user_menu->data) {
-        QMenu *subMenu = NULL;
-        ext_menu_t *menu = (ext_menu_t *)user_menu->data;
+        QMenu *subMenu = Q_NULLPTR;
+        ext_menu_t *menu = gxx_list_data(ext_menu_t *, user_menu);
 
         /* On this level only menu items should exist. Not doing an assert here,
          * as it could be an honest mistake */
         if (menu->type != EXT_MENUBAR_MENU) {
-            user_menu = g_list_next(user_menu);
+            user_menu = gxx_list_next(user_menu);
             continue;
         }
 
@@ -2781,7 +2781,7 @@ void MainWindow::addPluginIFStructures()
         this->externalMenuHelper(menu, subMenu, 0);
 
         /* Iterate Loop */
-        user_menu = g_list_next(user_menu);
+        user_menu = gxx_list_next(user_menu);
     }
 
     int cntToolbars = 0;
@@ -2789,14 +2789,14 @@ void MainWindow::addPluginIFStructures()
     QMenu *tbMenu = main_ui_->menuAdditionalToolbars;
     GList *if_toolbars = ext_toolbar_get_entries();
     while (if_toolbars && if_toolbars->data) {
-        ext_toolbar_t *toolbar = (ext_toolbar_t*)if_toolbars->data;
+        ext_toolbar_t *toolbar = gxx_list_data(ext_toolbar_t*, if_toolbars);
 
         if (toolbar->type != EXT_TOOLBAR_BAR) {
-            if_toolbars = g_list_next(if_toolbars);
+            if_toolbars = gxx_list_next(if_toolbars);
             continue;
         }
 
-        bool visible = g_list_find_custom(recent.gui_additional_toolbars, toolbar->name, (GCompareFunc)strcmp) ? true : false;
+        bool visible = g_list_find_custom(recent.gui_additional_toolbars, toolbar->name, reinterpret_cast<GCompareFunc>(strcmp)) ? true : false;
 
         AdditionalToolBar *ifToolBar = AdditionalToolBar::create(this, toolbar);
 
@@ -2811,7 +2811,7 @@ void MainWindow::addPluginIFStructures()
             iftbAction->setToolTip(tr("Show or hide the toolbar"));
             iftbAction->setData(VariantPointer<ext_toolbar_t>::asQVariant(toolbar));
 
-            QAction *before = 0;
+            QAction *before = Q_NULLPTR;
 
             foreach(QAction *action, tbMenu->actions()) {
                 /* Ensure we add the menu entries in sorted order */
@@ -2832,7 +2832,7 @@ void MainWindow::addPluginIFStructures()
             cntToolbars++;
         }
 
-        if_toolbars = g_list_next(if_toolbars);
+        if_toolbars = gxx_list_next(if_toolbars);
     }
 
     if (cntToolbars)
@@ -2849,7 +2849,7 @@ void MainWindow::removeAdditionalToolbar(QString toolbarName)
         AdditionalToolBar *ifToolBar = dynamic_cast<AdditionalToolBar *>(tb);
 
         if (ifToolBar && ifToolBar->menuName().compare(toolbarName)) {
-            GList *entry = g_list_find_custom(recent.gui_additional_toolbars, qUtf8Printable(ifToolBar->menuName()), (GCompareFunc)strcmp);
+            GList *entry = g_list_find_custom(recent.gui_additional_toolbars, qUtf8Printable(ifToolBar->menuName()), reinterpret_cast<GCompareFunc>(strcmp));
             if (entry) {
                 recent.gui_additional_toolbars = g_list_remove(recent.gui_additional_toolbars, entry->data);
             }
@@ -2877,6 +2877,28 @@ void MainWindow::setMwFileName(QString fileName)
 {
     mwFileName_ = fileName;
     return;
+}
+
+bool MainWindow::hasSelection()
+{
+    if (packet_list_)
+        return packet_list_->multiSelectActive();
+    return false;
+}
+
+QList<int> MainWindow::selectedRows(bool useFrameNum)
+{
+    if (packet_list_)
+        return packet_list_->selectedRows(useFrameNum);
+    return QList<int>();
+}
+
+frame_data * MainWindow::frameDataForRow(int row) const
+{
+    if (packet_list_)
+        return packet_list_->getFDataForRow(row);
+
+    return Q_NULLPTR;
 }
 
 /*

@@ -85,6 +85,7 @@ WSLUA_METAMETHOD FieldInfo__call(lua_State* L) {
         case FT_BOOLEAN:
                 lua_pushboolean(L,(int)fvalue_get_uinteger64(&(fi->ws_fi->value)));
                 return 1;
+        case FT_CHAR:
         case FT_UINT8:
         case FT_UINT16:
         case FT_UINT24:
@@ -509,7 +510,7 @@ WSLUA_FUNCTION wslua_all_field_infos(lua_State* L) {
 
 WSLUA_CLASS_DEFINE(Field,FAIL_ON_NULL("Field"));
 /*
-   A Field extractor to to obtain field values. A `Field` object can only be created *outside* of
+   A Field extractor to obtain field values. A `Field` object can only be created *outside* of
    the callback functions of dissectors, post-dissectors, heuristic-dissectors, and taps.
 
    Once created, it is used *inside* the callback functions, to generate a `FieldInfo` object.

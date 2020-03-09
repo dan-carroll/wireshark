@@ -86,6 +86,11 @@
 #define PROTOCOL_BINARY_RESPONSE_ETMPFAIL           0x86
 #define PROTOCOL_BINARY_RESPONSE_XATTR_EINVAL       0x87
 #define PROTOCOL_BINARY_RESPONSE_UNKNOWN_COLLECTION         0x88
+#define PROTOCOL_BINARY_RESPONSE_NO_COLLECTIONS_MANIFEST    0x89
+#define PROTOCOL_BINARY_RESPONSE_CANNOT_APPLY_MANIFEST      0x8a
+#define PROTOCOL_BINARY_RESPONSE_MANIFEST_IS_AHEAD          0x8b
+#define PROTOCOL_BINARY_RESPONSE_UNKNOWN_SCOPE              0x8c
+#define PROTOCOL_BINARY_RESPONSE_DCP_STREAMID_INVALID       0x8d
 #define PROTOCOL_BINARY_RESPONSE_DURABILITY_INVALID_LEVEL         0xa0
 #define PROTOCOL_BINARY_RESPONSE_DURABILITY_IMPOSSIBLE            0xa1
 #define PROTOCOL_BINARY_RESPONSE_SYNC_WRITE_IN_PROGRESS           0xa2
@@ -250,6 +255,7 @@
 #define PROTOCOL_BINARY_CMD_COLLECTIONS_SET_MANIFEST 0xb9
 #define PROTOCOL_BINARY_CMD_COLLECTIONS_GET_MANIFEST 0xba
 #define PROTOCOL_BINARY_CMD_COLLECTIONS_GET_ID       0xbb
+#define PROTOCOL_BINARY_CMD_COLLECTIONS_GET_SCOPE_ID 0xbc
 
 #define PROTOCOL_BINARY_CMD_SET_DRIFT_COUNTER_STATE 0xc1
 #define PROTOCOL_BINARY_CMD_GET_ADJUSTED_TIME       0xc2
@@ -268,6 +274,7 @@
 #define PROTOCOL_BINARY_CMD_SUBDOC_COUNTER          0xcf
 #define PROTOCOL_BINARY_CMD_SUBDOC_MULTI_LOOKUP     0xd0
 #define PROTOCOL_BINARY_CMD_SUBDOC_MULTI_MUTATION   0xd1
+#define PROTOCOL_BINARY_CMD_SUBDOC_GET_COUNT        0xd2
 
 /* DCP commands */
 #define PROTOCOL_BINARY_DCP_OPEN_CONNECTION         0x50
@@ -300,7 +307,9 @@
 #define PROTOCOL_BINARY_CMD_GET_CMD_TIMER           0xf3
 #define PROTOCOL_BINARY_CMD_SET_CTRL_TOKEN          0xf4
 #define PROTOCOL_BINARY_CMD_GET_CTRL_TOKEN          0xf5
+#define PROTOCOL_BINARY_CMD_UPDATE_EXTERNAL_USER_PERMISSIONS 0xf6
 #define PROTOCOL_BINARY_CMD_RBAC_REFRESH            0xf7
+#define PROTOCOL_BINARY_CMD_AUTH_PROVIDER           0xf8
 #define PROTOCOL_BINARY_CMD_DROP_PRIVILEGE          0xfb
 #define PROTOCOL_BINARY_CMD_ADJUST_TIMEOFDAY        0xfc
 #define PROTOCOL_BINARY_CMD_EWOULDBLOCK_CTL         0xfd
@@ -377,10 +386,14 @@ static int hf_subdoc_flags_xattrpath = -1;
 static int hf_subdoc_flags_expandmacros = -1;
 static int hf_subdoc_flags_reserved = -1;
 static int hf_extras_seqno = -1;
+static int hf_extras_mutation_seqno = -1;
 static int hf_extras_opaque = -1;
 static int hf_extras_reserved = -1;
 static int hf_extras_start_seqno = -1;
 static int hf_extras_end_seqno = -1;
+static int hf_extras_high_completed_seqno = -1;
+static int hf_extras_max_visible_seqno = -1;
+static int hf_extras_marker_version = -1;
 static int hf_extras_vbucket_uuid = -1;
 static int hf_extras_snap_start_seqno = -1;
 static int hf_extras_snap_end_seqno = -1;
@@ -481,8 +494,8 @@ static int hf_flex_frame_len = -1;
 static int hf_flex_frame_len_esc = -1;
 static int hf_flex_frame_tracing_duration = -1;
 static int hf_flex_frame_durability_req = -1;
-static int hf_flex_frame_durability_timeout = -1;
 static int hf_flex_frame_dcp_stream_id = -1;
+static int hf_flex_frame_impersonated_user = -1;
 
 static expert_field ef_warn_shall_not_have_value = EI_INIT;
 static expert_field ef_warn_shall_not_have_extras = EI_INIT;
@@ -540,6 +553,9 @@ static const value_string magic_vals[] = {
 #define FLEX_REQUEST_ID_REORDER 0
 #define FLEX_REQUEST_ID_DURABILITY 1
 #define FLEX_REQUEST_ID_DCP_STREAM_ID 2
+#define FLEX_REQUEST_ID_OPEN_TRACING 3
+#define FLEX_REQUEST_ID_IMPERSONATE 4
+#define FLEX_REQUEST_ID_PRESERVE_TTL 5
 
 static const value_string flex_frame_response_ids[] = {
   { FLEX_RESPONSE_ID_RX_TX_DURATION, "Server Recv->Send duration"},
@@ -550,6 +566,9 @@ static const value_string flex_frame_request_ids[] = {
   { FLEX_REQUEST_ID_REORDER, "Out of order Execution"},
   { FLEX_REQUEST_ID_DURABILITY, "Durability Requirements"},
   { FLEX_REQUEST_ID_DCP_STREAM_ID, "DCP Stream Identifier"},
+  { FLEX_REQUEST_ID_OPEN_TRACING, "Open Tracing"},
+  { FLEX_REQUEST_ID_IMPERSONATE, "Impersonate User"},
+  { FLEX_REQUEST_ID_PRESERVE_TTL, "Preserve TTL"},
   { 0, NULL }
 };
 
@@ -590,6 +609,16 @@ static const value_string status_vals[] = {
     "There is something wrong with the syntax of the provided XATTR."},
   { PROTOCOL_BINARY_RESPONSE_UNKNOWN_COLLECTION,
     "Operation attempted with an unknown collection."},
+  { PROTOCOL_BINARY_RESPONSE_NO_COLLECTIONS_MANIFEST,
+    "No collections manifest has been set"},
+  { PROTOCOL_BINARY_RESPONSE_CANNOT_APPLY_MANIFEST,
+    "Cannot apply the given manifest"},
+  { PROTOCOL_BINARY_RESPONSE_MANIFEST_IS_AHEAD,
+    "Operation attempted with a manifest ahead of the server"},
+  { PROTOCOL_BINARY_RESPONSE_UNKNOWN_SCOPE,
+    "Operation attempted with an unknown scope."},
+  { PROTOCOL_BINARY_RESPONSE_DCP_STREAMID_INVALID,
+    "DCP Stream ID is invalid"},
   { PROTOCOL_BINARY_RESPONSE_DURABILITY_INVALID_LEVEL,
     "The specified durability level is invalid" },
   { PROTOCOL_BINARY_RESPONSE_DURABILITY_IMPOSSIBLE,
@@ -786,6 +815,7 @@ static const value_string opcode_vals[] = {
   { PROTOCOL_BINARY_CMD_COLLECTIONS_SET_MANIFEST,   "Set Collection's Manifest" },
   { PROTOCOL_BINARY_CMD_COLLECTIONS_GET_MANIFEST,   "Get Collection's Manifest" },
   { PROTOCOL_BINARY_CMD_COLLECTIONS_GET_ID,         "Get Collection ID"        },
+  { PROTOCOL_BINARY_CMD_COLLECTIONS_GET_SCOPE_ID,   "Get Scope ID"             },
   { PROTOCOL_BINARY_CMD_SET_DRIFT_COUNTER_STATE,    "Set Drift Counter State"  },
   { PROTOCOL_BINARY_CMD_GET_ADJUSTED_TIME,          "Get Adjusted Time"        },
   { PROTOCOL_BINARY_CMD_SUBDOC_GET,                 "Subdoc Get"               },
@@ -801,13 +831,16 @@ static const value_string opcode_vals[] = {
   { PROTOCOL_BINARY_CMD_SUBDOC_COUNTER,             "Subdoc Counter"           },
   { PROTOCOL_BINARY_CMD_SUBDOC_MULTI_LOOKUP,        "Subdoc Multipath Lookup"  },
   { PROTOCOL_BINARY_CMD_SUBDOC_MULTI_MUTATION,      "Subdoc Multipath Mutation"},
+  { PROTOCOL_BINARY_CMD_SUBDOC_GET_COUNT,           "Subdoc Get Count"         },
   { PROTOCOL_BINARY_CMD_SCRUB,                      "Scrub"                    },
   { PROTOCOL_BINARY_CMD_ISASL_REFRESH,              "isasl Refresh"            },
   { PROTOCOL_BINARY_CMD_SSL_CERTS_REFRESH,          "SSL Certificates Refresh" },
   { PROTOCOL_BINARY_CMD_GET_CMD_TIMER,              "Internal Timer Control"   },
   { PROTOCOL_BINARY_CMD_SET_CTRL_TOKEN,             "Set Control Token"        },
   { PROTOCOL_BINARY_CMD_GET_CTRL_TOKEN,             "Get Control Token"        },
+  { PROTOCOL_BINARY_CMD_UPDATE_EXTERNAL_USER_PERMISSIONS, "Update External User Permissions"},
   { PROTOCOL_BINARY_CMD_RBAC_REFRESH,               "RBAC Refresh"             },
+  { PROTOCOL_BINARY_CMD_AUTH_PROVIDER,              "Auth Provider"            },
   { PROTOCOL_BINARY_CMD_DROP_PRIVILEGE,             "Drop Privilege"           },
   { PROTOCOL_BINARY_CMD_ADJUST_TIMEOFDAY,           "Adjust Timeofday"         },
   { PROTOCOL_BINARY_CMD_EWOULDBLOCK_CTL,            "EWOULDBLOCK Control"      },
@@ -893,6 +926,8 @@ static const value_string feature_vals[] = {
   {0x10, "AltRequestSupport"},
   {0x11, "SyncReplication"},
   {0x12, "Collections"},
+  {0x13, "OpenTracing"},
+  {0x14, "PreserveTtl"},
   {0, NULL}
 };
 
@@ -903,6 +938,14 @@ static const value_string dcp_system_event_id_vals [] = {
     {3, "CreateScope"},
     {4, "DropScope"},
     {0, NULL}
+};
+
+static const int * snapshot_marker_flags [] = {
+    &hf_extras_flags_dcp_snapshot_marker_memory,
+    &hf_extras_flags_dcp_snapshot_marker_disk,
+    &hf_extras_flags_dcp_snapshot_marker_chk,
+    &hf_extras_flags_dcp_snapshot_marker_ack,
+    NULL
 };
 
 static dissector_handle_t couchbase_handle;
@@ -1089,8 +1132,11 @@ dissect_extras(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
         proto_tree_add_item(extras_tree, hf_extras_expiration, tvb, offset, 4, ENC_BIG_ENDIAN);
         offset += 4;
       } else {
-        /* Response shall not have extras */
-        illegal = TRUE;
+        proto_tree_add_item(extras_tree, hf_extras_vbucket_uuid, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
+
+        proto_tree_add_item(extras_tree, hf_extras_mutation_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
       }
     } else if (request) {
       /* Request must have extras */
@@ -1113,8 +1159,11 @@ dissect_extras(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
         proto_tree_add_item(extras_tree, hf_extras_expiration, tvb, offset, 4, ENC_BIG_ENDIAN);
         offset += 4;
       } else {
-        /* Response must not have extras (response is in Value) */
-        illegal = TRUE;
+        proto_tree_add_item(extras_tree, hf_extras_vbucket_uuid, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
+
+        proto_tree_add_item(extras_tree, hf_extras_mutation_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
       }
     } else if (request) {
       /* Request must have extras */
@@ -1132,13 +1181,27 @@ dissect_extras(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
 
   case PROTOCOL_BINARY_CMD_DELETE:
   case PROTOCOL_BINARY_CMD_DELETEQ:
-  case PROTOCOL_BINARY_CMD_QUIT:
-  case PROTOCOL_BINARY_CMD_QUITQ:
-  case PROTOCOL_BINARY_CMD_VERSION:
   case PROTOCOL_BINARY_CMD_APPEND:
   case PROTOCOL_BINARY_CMD_APPENDQ:
   case PROTOCOL_BINARY_CMD_PREPEND:
   case PROTOCOL_BINARY_CMD_PREPENDQ:
+    if (extlen) {
+      if (request) {
+        /* Must not have extras */
+        illegal = TRUE;
+      } else {
+        proto_tree_add_item(extras_tree, hf_extras_vbucket_uuid, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
+
+        proto_tree_add_item(extras_tree, hf_extras_mutation_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
+      }
+    }
+    break;
+
+  case PROTOCOL_BINARY_CMD_QUIT:
+  case PROTOCOL_BINARY_CMD_QUITQ:
+  case PROTOCOL_BINARY_CMD_VERSION:
   case PROTOCOL_BINARY_CMD_STAT:
   case PROTOCOL_BINARY_CMD_OBSERVE:
   case PROTOCOL_BINARY_CMD_OBSERVE_SEQNO:
@@ -1287,20 +1350,20 @@ dissect_extras(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
   case PROTOCOL_BINARY_DCP_SNAPSHOT_MARKER:
     if (extlen) {
       if (request) {
-        static const int * extra_flags[] = {
-          &hf_extras_flags_dcp_snapshot_marker_memory,
-          &hf_extras_flags_dcp_snapshot_marker_disk,
-          &hf_extras_flags_dcp_snapshot_marker_chk,
-          &hf_extras_flags_dcp_snapshot_marker_ack,
-          NULL
-        };
-
-        proto_tree_add_item(extras_tree, hf_extras_start_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
-        offset += 8;
-        proto_tree_add_item(extras_tree, hf_extras_end_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
-        offset += 8;
-        proto_tree_add_bitmask(extras_tree, tvb, offset, hf_extras_flags, ett_extras_flags, extra_flags, ENC_BIG_ENDIAN);
-        offset += 4;
+        // Two formats exist and the extlen allows us to know which is which
+        if (extlen == 1) {
+          proto_tree_add_item(extras_tree, hf_extras_marker_version, tvb, offset, 1, ENC_BIG_ENDIAN);
+          offset += 1;
+        } else if (extlen == 20){
+          proto_tree_add_item(extras_tree, hf_extras_start_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+          offset += 8;
+          proto_tree_add_item(extras_tree, hf_extras_end_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+          offset += 8;
+          proto_tree_add_bitmask(extras_tree, tvb, offset, hf_extras_flags, ett_extras_flags, snapshot_marker_flags, ENC_BIG_ENDIAN);
+          offset += 4;
+        } else {
+          illegal = TRUE;
+        }
       } else {
         illegal = TRUE;
       }
@@ -2221,6 +2284,21 @@ dissect_value(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
       } else {
         ti = proto_tree_add_item(tree, hf_get_errmap_version, tvb, offset, value_len, ENC_BIG_ENDIAN);
       }
+    } else if (request && opcode == PROTOCOL_BINARY_DCP_SNAPSHOT_MARKER) {
+      if (value_len != 36) {
+        expert_add_info_format(pinfo, ti, &ef_warn_illegal_value_length, "Illegal Value length, should be 36");
+        ti = proto_tree_add_item(tree, hf_value, tvb, offset, value_len, ENC_ASCII | ENC_NA);
+      } else {
+        proto_tree_add_item(tree, hf_extras_start_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
+        proto_tree_add_item(tree, hf_extras_end_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
+        proto_tree_add_bitmask(tree, tvb, offset, hf_extras_flags, ett_extras_flags, snapshot_marker_flags, ENC_BIG_ENDIAN);
+        offset += 4;
+        proto_tree_add_item(tree, hf_extras_max_visible_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+        offset += 8;
+        proto_tree_add_item(tree, hf_extras_high_completed_seqno, tvb, offset, 8, ENC_BIG_ENDIAN);
+      }
     } else {
       ti = proto_tree_add_item(tree, hf_value, tvb, offset, value_len, ENC_ASCII | ENC_NA);
 #ifdef HAVE_SNAPPY
@@ -2273,7 +2351,6 @@ dissect_value(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
     case PROTOCOL_BINARY_DCP_CLOSE_STREAM:
     case PROTOCOL_BINARY_DCP_FAILOVER_LOG_REQUEST:
     case PROTOCOL_BINARY_DCP_STREAM_END:
-    case PROTOCOL_BINARY_DCP_SNAPSHOT_MARKER:
     case PROTOCOL_BINARY_DCP_DELETION:
     case PROTOCOL_BINARY_DCP_EXPIRATION:
     case PROTOCOL_BINARY_DCP_FLUSH:
@@ -2386,10 +2463,6 @@ static void flex_frame_durability_dissect(tvbuff_t* tvb,
     return;
   }
   proto_tree_add_item(frame_tree, hf_flex_frame_durability_req, tvb, offset, 1, ENC_BIG_ENDIAN);
-  if (length == 3) {
-    offset++;
-    proto_tree_add_item(frame_tree, hf_flex_frame_durability_timeout, tvb, offset, 2, ENC_BIG_ENDIAN);
-  }
 }
 
 static void flex_frame_dcp_stream_id_dissect(tvbuff_t* tvb,
@@ -2407,6 +2480,34 @@ static void flex_frame_dcp_stream_id_dissect(tvbuff_t* tvb,
   } else {
     guint16 sid = tvb_get_ntohs(tvb, offset);
     proto_tree_add_uint(frame_tree, hf_flex_frame_dcp_stream_id, tvb, offset, 2, sid);
+  }
+}
+
+static void flex_frame_impersonate_dissect(tvbuff_t* tvb,
+                                           proto_tree* frame_tree,
+                                           gint offset,
+                                           gint length) {
+  proto_tree_add_item(frame_tree,
+                      hf_flex_frame_impersonated_user,
+                      tvb,
+                      offset,
+                      length,
+                      ENC_UTF_8|ENC_STR_HEX);
+}
+
+static void flex_frame_preserve_ttl(tvbuff_t* tvb,
+                                    proto_tree* frame_tree,
+                                    gint offset,
+                                    gint length) {
+  /* Expects no data, so just check len */
+  if (length != 0) {
+    proto_tree_add_expert_format(frame_tree,
+                                 NULL,
+                                 &ef_warn_unknown_flex_len,
+                                 tvb,
+                                 offset,
+                                 length,
+                                 "FlexFrame: Preserve TTL with illegal length %d", length);
   }
 }
 
@@ -2429,6 +2530,8 @@ static const struct flex_frame_by_id_dissect flex_frame_request_dissect[] = {
   { FLEX_REQUEST_ID_REORDER, &flex_frame_reorder_dissect},
   { FLEX_REQUEST_ID_DURABILITY, &flex_frame_durability_dissect},
   { FLEX_REQUEST_ID_DCP_STREAM_ID, &flex_frame_dcp_stream_id_dissect},
+  { FLEX_REQUEST_ID_IMPERSONATE, &flex_frame_impersonate_dissect},
+  { FLEX_REQUEST_ID_PRESERVE_TTL, &flex_frame_preserve_ttl},
   { 0, NULL }
 };
 
@@ -2813,8 +2916,8 @@ proto_register_couchbase(void)
 
     { &hf_flex_frame_tracing_duration, {"Server Recv->Send duration", "couchbase.flex_frame.frame.duration", FT_DOUBLE, BASE_NONE|BASE_UNIT_STRING, &units_microseconds, 0, NULL, HFILL } },
     { &hf_flex_frame_durability_req, {"Durability Requirement", "couchbase.flex_frame.frame.durability_req", FT_UINT8, BASE_DEC, VALS(flex_frame_durability_req), 0, NULL, HFILL } },
-    { &hf_flex_frame_durability_timeout, {"Durability Timeout", "couchbase.flex_frame.frame.durability_timeout", FT_UINT16, BASE_DEC, NULL, 0, NULL, HFILL } },
     { &hf_flex_frame_dcp_stream_id, {"DCP Stream Identifier", "couchbase.flex_frame.frame.dcp_stream_id", FT_UINT16, BASE_DEC, NULL, 0, NULL, HFILL } },
+    { &hf_flex_frame_impersonated_user, {"Impersonated User", "couchbase.flex_frame.frame.impersonated_user", FT_STRING, BASE_NONE, NULL, 0, NULL, HFILL } },
 
     { &hf_extras, { "Extras", "couchbase.extras", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
     { &hf_extras_flags, { "Flags", "couchbase.extras.flags", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
@@ -2853,10 +2956,14 @@ proto_register_couchbase(void)
     { &hf_extras_flags_dcp_collections, {"Enable Collections", "couchbase.extras.flags.dcp_collections", FT_BOOLEAN, 16, TFS(&tfs_set_notset), 0x10, "Indicates the server should stream collections", HFILL} },
     { &hf_extras_flags_dcp_include_delete_times, {"Include Delete Times", "couchbase.extras.flags.dcp_include_delete_times", FT_BOOLEAN, 16, TFS(&tfs_set_notset), 0x20, "Indicates the server should include delete timestamps", HFILL} },
     { &hf_extras_seqno, { "Sequence number", "couchbase.extras.seqno", FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+    { &hf_extras_mutation_seqno, { "Mutation Sequence Number", "couchbase.extras.mutation_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
     { &hf_extras_opaque, { "Opaque (vBucket identifier)", "couchbase.extras.opaque", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
     { &hf_extras_reserved, { "Reserved", "couchbase.extras.reserved", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
     { &hf_extras_start_seqno, { "Start Sequence Number", "couchbase.extras.start_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
-    { &hf_extras_end_seqno, { "End Sequence Number", "couchbase.extras.start_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+    { &hf_extras_end_seqno, { "End Sequence Number", "couchbase.extras.end_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+    { &hf_extras_high_completed_seqno, { "High Completed Sequence Number", "couchbase.extras.high_completed_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+    { &hf_extras_max_visible_seqno, { "Max Visible Seqno", "couchbase.extras.max_visible_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+    { &hf_extras_marker_version, { "Snapshot Marker Version", "couchbase.extras.marker_version", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
     { &hf_extras_vbucket_uuid, { "VBucket UUID", "couchbase.extras.vbucket_uuid", FT_UINT64, BASE_HEX, NULL, 0x0, NULL, HFILL } },
     { &hf_extras_snap_start_seqno, { "Snapshot Start Sequence Number", "couchbase.extras.snap_start_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },
     { &hf_extras_snap_end_seqno, { "Snapshot End Sequence Number", "couchbase.extras.snap_start_seqno", FT_UINT64, BASE_DEC, NULL, 0x0, NULL, HFILL } },

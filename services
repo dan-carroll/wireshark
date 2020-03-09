@@ -996,8 +996,6 @@ sdproxy		1297/tcp/udp
 lpcp		1298/tcp/udp
 hp-sci		1299/tcp/udp
 h323hostcallsc	1300/tcp/udp	# H.323 Secure Call Control Signalling
-ci3-software-1	1301/tcp/udp	# CI3-Software-1
-ci3-software-2	1302/tcp/udp	# CI3-Software-2
 sftsrv		1303/tcp/udp
 boomerang	1304/tcp/udp	# Boomerang
 pe-mike		1305/tcp/udp
@@ -2169,7 +2167,7 @@ wago-io-system	2455/tcp/udp	# WAGO-IO-SYSTEM
 altav-remmgt	2456/tcp/udp
 rapido-ip	2457/tcp/udp	# Rapido_IP
 griffin		2458/tcp/udp
-community	2459/tcp/udp	# Community
+xrpl		2459/tcp/udp	# Community
 ms-theater	2460/tcp/udp
 qadmifoper	2461/tcp/udp
 qadmifevent	2462/tcp/udp
@@ -2571,7 +2569,7 @@ dialpad-voice1	2860/tcp/udp	# Dialpad Voice 1
 dialpad-voice2	2861/tcp/udp	# Dialpad Voice 2
 ttg-protocol	2862/tcp/udp	# TTG Protocol
 sonardata	2863/tcp/udp	# Sonar Data
-astromed-main	2864/tcp/udp	# main 5001 cmd
+astronova-main	2864/tcp/udp	# main 5001 cmd
 pit-vpn		2865/tcp/udp
 iwlistener	2866/tcp/udp
 esps-portal	2867/tcp/udp
@@ -3139,7 +3137,7 @@ connect-client	3441/tcp/udp	# OC Connect Client
 connect-server	3442/tcp/udp	# OC Connect Server
 ov-nnm-websrv	3443/tcp/udp	# OpenView Network Node Manager WEB Server
 denali-server	3444/tcp/udp	# Denali Server
-monp		3445/tcp/udp	# Media Object Network
+monp		3445/tcp/udp	# Media Object Network Protocol
 3comfaxrpc	3446/tcp/udp	# 3Com FAX RPC port
 directnet	3447/tcp/udp	# DirectNet IM System
 dnc-port	3448/tcp/udp	# Discovery and Net Config
@@ -3308,7 +3306,7 @@ trendchip-dcp	3608/tcp/udp	# Trendchip control protocol
 cpdi-pidas-cm	3609/tcp/udp	# CPDI PIDAS Connection Mon
 echonet		3610/tcp/udp	# ECHONET
 six-degrees	3611/tcp/udp	# Six Degrees Port
-hp-dataprotect	3612/tcp/udp	# HP Data Protector
+dataprotector	3612/tcp/udp	# Micro Focus Data Protector
 alaris-disc	3613/tcp/udp	# Alaris Device Discovery
 sigma-port	3614/tcp/udp	# Satchwell Sigma
 start-network	3615/tcp/udp	# Start Messaging Network
@@ -4075,6 +4073,7 @@ menandmice-upg	4603/tcp	# Men & Mice Upgrade Agent
 irp		4604/tcp	# Identity Registration Protocol
 sixchat		4605/tcp	# Direct End to End Secure Chat Protocol
 ventoso		4621/udp	# Bidirectional single port remote radio VOIP and Control stream
+dots-signal	4646/tcp/udp	# Distributed Denial-of-Service Open Threat Signaling (DOTS) Signal Channel
 playsta2-app	4658/tcp/udp	# PlayStation2 App Port
 playsta2-lob	4659/tcp/udp	# PlayStation2 Lobby Port
 smaclmgr	4660/tcp/udp
@@ -4516,7 +4515,7 @@ sgi-esphttp	5554/tcp/udp	# SGI ESP HTTP
 personal-agent	5555/tcp/udp	# Personal Agent
 freeciv		5556/tcp/udp	# Freeciv gameplay
 farenet		5557/tcp	# Sandlab FARENET
-hpe-dp-bura	5565/tcp	# HPE Advanced BURA
+dp-bura		5565/tcp	# Data Protector BURA
 westec-connect	5566/tcp	# Westec Connect
 dof-dps-mc-sec	5567/tcp/udp	# DOF Protocol Stack Multicast/Secure Transport
 sdt		5568/tcp/udp	# Session Data Transport Multicast
@@ -4774,6 +4773,7 @@ svdrp-disc	6419/udp	# Simple VDR Protocol Discovery
 nim-vdrshell	6420/tcp/udp	# NIM_VDRShell
 nim-wan		6421/tcp/udp	# NIM_WAN
 pgbouncer	6432/tcp	# PgBouncer
+heliosd		6440/tcp	# heliosd daemon
 tarp		6442/tcp	# Transitory Application Request Protocol
 sun-sr-https	6443/tcp/udp	# Service Registry Default HTTPS Domain
 sge-qmaster	6444/tcp/udp	# Grid Engine Qmaster Service
@@ -4896,6 +4896,7 @@ acctopus-st	6868/udp	# Acctopus Status
 muse		6888/tcp/udp	# MUSE
 rtimeviewer	6900/tcp	# R*TIME Viewer Data Interface
 jetstream	6901/tcp	# Novell Jetstream messaging protocol
+split-ping	6924/tcp/udp	# Ping with RX/TX latency/loss split
 ethoscan	6935/tcp/udp	# EthoScan Service
 xsmsvc		6936/tcp/udp	# XenSource Management Service
 bioserver	6946/tcp/udp	# Biometrics Server
@@ -5039,7 +5040,7 @@ atul		7543/tcp/udp	# atul server
 nta-ds		7544/tcp/udp	# FlowAnalyzer DisplayServer
 nta-us		7545/tcp/udp	# FlowAnalyzer UtilityServer
 cfs		7546/tcp/udp	# Cisco Fabric service
-cwmp		7547/tcp/udp	# DSL Forum CWMP
+cwmp		7547/tcp/udp	# Broadband Forum CWMP
 tidp		7548/tcp/udp	# Threat Information Distribution Protocol
 nls-tl		7549/tcp/udp	# Network Layer Signaling Transport Layer
 cloudsignaling	7550/udp	# Cloud Signaling Service
@@ -5182,6 +5183,7 @@ http-alt	8080/tcp/udp	# HTTP Alternate (see port 80)
 sunproxyadmin	8081/tcp/udp	# Sun Proxy Admin Service
 us-cli		8082/tcp/udp	# Utilistor (Client)
 us-srv		8083/tcp/udp	# Utilistor (Server)
+websnp		8084/tcp	# Snarl Network Protocol over HTTP
 d-s-n		8086/tcp/udp	# Distributed SCADA Networking Rendezvous Port
 simplifymedia	8087/tcp/udp	# Simplify Media SPP Protocol
 radan-http	8088/tcp/udp	# Radan HTTP
@@ -5301,6 +5303,7 @@ msi-cps-rm-disc	8675/udp	# Motorola Solutions Customer Programming Software for 
 sun-as-jmxrmi	8686/tcp/udp	# Sun App Server - JMX/RMI
 openremote-ctrl	8688/tcp	# OpenRemote Controller HTTP/REST
 vnyx		8699/tcp	# VNYX Primary Port
+semi-grpc	8710/tcp	# gRPC for SEMI Standards implementations
 nvc		8711/tcp	# Nuance Voice Control
 dtp-net		8732/udp	# DASGIP Net Services
 ibus		8733/tcp/udp	# iBus
@@ -5310,6 +5313,8 @@ openqueue	8764/tcp/udp	# OPENQUEUE
 ultraseek-http	8765/tcp/udp	# Ultraseek HTTP
 amcs		8766/tcp/udp	# Agilent Connectivity Service
 core-of-source	8767/tcp	# Online mobile multiplayer game
+sandpolis	8768/tcp	# Sandpolis Server
+oktaauthenticat	8769/tcp	# Okta MultiPlatform Access Mgmt for Cloud Svcs
 dpap		8770/tcp/udp	# Digital Photo Access Protocol (iPhoto)
 uec		8778/tcp	# Stonebranch Universal Enterprise Controller
 msgclnt		8786/tcp/udp	# Message Client
@@ -5512,6 +5517,7 @@ sstp-2		9801/tcp/udp	# Sakura Script Transfer Protocol-2
 davsrcs		9802/tcp/udp	# WebDAV Source TLS/SSL
 sapv1		9875/tcp/udp	# Session Announcement v1
 sd		9876/tcp	# Session Director
+x510		9877/tcp	# The X.510 wrapper protocol
 kca-service	9878/udp	# The KX509 Kerberized Certificate Issuance Protocol in Use in 2012
 cyborg-systems	9888/tcp/udp	# CYBORG Systems
 gt-proxy	9889/tcp/udp	# Port for Cable network related data proxy or repeater
@@ -5598,6 +5604,7 @@ tile-ml		10261/tcp	# Tile remote machine learning
 blocks		10288/tcp/udp	# Blocks
 cosir		10321/tcp	# Computer Op System Information Report
 bngsync		10439/udp	# BalanceNG session table synchronization protocol
+cirrossp	10443/tcp	# CirrosSP Workstation Communication
 hip-nat-t	10500/udp	# HIP NAT-Traversal
 MOS-lower	10540/tcp/udp	# MOS Media Object Metadata Port
 MOS-upper	10541/tcp/udp	# MOS Running Order Port
@@ -5849,6 +5856,7 @@ athand-mmp	20999/tcp/udp	# At Hand MMP
 irtrans		21000/tcp/udp	# IRTrans Control
 notezilla-lan	21010/tcp	# Notezilla.Lan Server
 trinket-agent	21212/tcp	# Distributed artificial intelligence
+cohesity-agent	21213/tcp	# Cohesity backup agents
 aigairserver	21221/tcp	# Services for Air Server
 rdm-tfs		21553/tcp	# Raima RDM TFS
 dfserver	21554/tcp/udp	# MineScape Design File Server
@@ -5966,6 +5974,7 @@ astrolink	27876/tcp	# Astrolink Protocol
 tw-auth-key	27999/tcp/udp	# TW Authentication/Key Distribution and
 nxlmd		28000/tcp/udp	# NX License Manager
 pqsp		28001/tcp	# PQ Service
+gruber-cashreg	28010/tcp	# Gruber cash registry protocol
 a27-ran-ran	28119/udp	# A27 cdma2000 RAN Management
 voxelstorm	28200/tcp/udp	# VoxelStorm game server
 siemensgsm	28240/tcp/udp	# Siemens GSM
@@ -6017,6 +6026,7 @@ filenet-obrok	32777/tcp/udp	# FileNet BPM CORBA
 mlsn		32801/tcp/udp	# Multiple Listing Service Network
 retp		32811/tcp	# Real Estate Transport Protocol
 idmgratm	32896/tcp/udp	# Attachmate ID Manager
+wg-endpt-comms	33000/tcp	# WatchGuard Endpoint Communications
 mysqlx		33060/tcp	# MySQL Database Extended Interface
 aurora-balaena	33123/tcp/udp	# Aurora (Balaena Ltd)
 diamondport	33331/tcp/udp	# DiamondCentral Interface
@@ -6115,6 +6125,7 @@ pmcd		44321/tcp/udp	# PCP server (pmcd)
 pmcdproxy	44322/tcp/udp	# PCP server (pmcd) proxy
 pmwebapi	44323/tcp	# HTTP binding for Performance Co-Pilot client API
 cognex-dataman	44444/tcp	# Cognex DataMan Management Protocol
+acronis-backup	44445/tcp	# Acronis Backup Gateway service port
 domiq		44544/udp	# DOMIQ Building Automation
 rbr-debug	44553/tcp/udp	# REALbasic Remote Debug
 asihpi		44600/udp	# AudioScience HPI

@@ -49,6 +49,8 @@ static int hf_gtpv2_response_in = -1;
 static int hf_gtpv2_response_to = -1;
 static int hf_gtpv2_response_time = -1;
 static int hf_gtpv2_spare_half_octet = -1;
+//static int hf_gtpv2_spare_b7_b1 = -1;
+static int hf_gtpv2_spare_b7_b3 = -1;
 static int hf_gtpv2_spare_bits = -1;
 static int hf_gtpv2_flags = -1;
 static int hf_gtpv2_version = -1;
@@ -156,6 +158,11 @@ static int hf_gtpv2_ltemui = -1;
 static int hf_gtpv2_ltempi = -1;
 static int hf_gtpv2_enbcrsi = -1;
 static int hf_gtpv2_tspcmi = -1;
+static int hf_gtpv2_ethpdn = -1;
+static int hf_gtpv2_n5gnmi = -1;
+static int hf_gtpv2_5gcnrs = -1;
+static int hf_gtpv2_5gcnri = -1;
+static int hf_gtpv2_5srhoi = -1;
 
 
 static int hf_gtpv2_pdn_type = -1;
@@ -378,6 +385,8 @@ static int hf_gtpv2_mm_context_ex_access_res_data_len = -1;
 static int hf_gtpv2_mm_context_ue_add_sec_cap_len = -1;
 static int hf_gtpv2_mm_context_ue_nr_sec_cap_len = -1;
 static int hf_gtpv2_mm_context_apn_rte_ctrl_sts_len = -1;
+static int hf_gtpv2_mm_context_cnr_len = -1;
+static int hf_gtpv2_mm_context_ue_radio_cap_len = -1;
 static int hf_gtpv2_uci_csg_id = -1;
 static int hf_gtpv2_uci_csg_id_spare = -1;
 static int hf_gtpv2_uci_access_mode = -1;
@@ -399,6 +408,9 @@ static int hf_gtpv2_mm_context_nr_qui = -1;
 static int hf_gtpv2_mm_context_nr_qua = -1;
 static int hf_gtpv2_mm_context_uamb_ri = -1;
 static int hf_gtpv2_mm_context_osci = -1;
+static int hf_gtpv2_mm_context_nruna = -1;
+static int hf_gtpv2_mm_context_nrusrna = -1;
+static int hf_gtpv2_mm_context_nrna = -1;
 static int hf_gtpv2_mm_context_ussrna = -1;
 static int hf_gtpv2_mm_context_nrsrna = -1;
 
@@ -610,6 +622,12 @@ static int hf_gtpv2_node_name = -1;
 static int hf_gtpv2_length_of_node_realm = -1;
 static int hf_gtpv2_node_realm = -1;
 static int hf_gtpv2_ms_ts = -1;
+static int hf_gtpv2_mon_event_inf_nsur = -1;
+static int hf_gtpv2_mon_event_inf_nsui = -1;
+static int hf_gtpv2_mon_event_inf_scef_reference_id = -1;
+static int hf_gtpv2_mon_event_inf_scef_id_length = -1;
+static int hf_gtpv2_mon_event_inf_scef_id = -1;
+static int hf_gtpv2_mon_event_inf_remaining_number_of_reports = -1;
 static int hf_gtpv2_rohc_profiles_bit0 = -1;
 static int hf_gtpv2_rohc_profiles_bit1 = -1;
 static int hf_gtpv2_rohc_profiles_bit2 = -1;
@@ -640,7 +658,7 @@ static int hf_gtpv2_csg_info_rep_action_b0 = -1;
 static int hf_gtpv2_csg_info_rep_action_b1 = -1;
 static int hf_gtpv2_csg_info_rep_action_b2 = -1;
 static int hf_gtpv2_gnodeb_id_len = -1;
-static int hf_gtpv2_godeb_id = -1;
+static int hf_gtpv2_gnodeb_id = -1;
 static int hf_gtpv2_5gs_tac = -1;
 static int hf_gtpv2_en_gnb_id_len = -1;
 static int hf_gtpv2_5tac;
@@ -756,6 +774,9 @@ static int hf_gtpv2_max_pkt_loss_rte_ul = -1;
 static int hf_gtpv2_max_pkt_loss_rte_dl = -1;
 
 static int hf_gtpv2_spare_b7_b2 = -1;
+static int hf_gtpv2_spare_b7_b5 = -1;
+static int hf_gtpv2_mm_context_iov_updates_counter = -1;
+static int hf_gtpv2_mm_context_ear_len = -1;
 
 static gint ett_gtpv2 = -1;
 static gint ett_gtpv2_flags = -1;
@@ -1180,8 +1201,8 @@ static gint ett_gtpv2_ies[NUM_GTPV2_IES];
 #define GTPV2_IE_PAGING_AND_SERVICE_INF 186
 #define GTPV2_IE_INTEGER_NUMBER         187
 #define GTPV2_IE_MILLISECOND_TS         188
+#define GTPV2_IE_MON_EVENT_INF          189
 /*
-189    Monitoring Event Information
 190    ECGI List
 191    Remote UE Context
 192    Remote User ID
@@ -1199,7 +1220,7 @@ static gint ett_gtpv2_ies[NUM_GTPV2_IES];
 #define GTPV2_IE_MAX_PKT_LOSS_RTE                    203
 #define GTPV2_IE_APN_RTE_CNTRL_STATUS                204
 #define GTPV2_IE_EXT_TRS_INF                         205
-
+#define GTPV2_IE_MON_EVENT_EXT_INF                   206
 /*
 203 to 253    Spare. For future use.
 254    Special IE type for IE Type Extension
@@ -1384,6 +1405,7 @@ static const value_string gtpv2_element_type_vals[] = {
     {203, "Maximum Packet Loss Rate" },                                         /* Extendable / 8.134 */
     {204, "APN Rate Control Status" },                                          /* Extendable / 8.135 */
     {205, "Extended Trace Information" },                                       /* Extendable / 8.136 */
+    {206, "Monitoring Event Extension Information" },                           /* Extendable / 8.137 */
                                                                                 /* 206 to 254    Spare. For future use.    */
     {255, "Private Extension"},                                                 /* Variable Length / 8.67 */
     {0, NULL}
@@ -1529,8 +1551,7 @@ static const value_string gtpv2_cause_vals[] = {
     { 12, "PGW not responding"},
     { 13, "Network Failure"},
     { 14, "QoS parameter mismatch"},
-    /* 15 Spare. This value range is reserved for Cause values in a request message */
-    { 15, "Spare"},
+    { 15, "EPS to 5GS Mobility"},
     /* Acceptance in a Response / triggered message */
     { 16, "Request accepted"},
     { 17, "Request accepted partially"},
@@ -1628,7 +1649,7 @@ static const value_string gtpv2_cause_vals[] = {
     {107, "Invalid reply from remote peer"},
     {108, "Fallback to GTPv1"},
     {109, "Invalid peer"},
-    {110, "Temporarily rejected due to handover procedure in progress"},
+    {110, "Temporarily rejected due to handover/TAU/RAU procedure in progress"},
     {111, "Modifications not limited to S1-U bearers"},
     {112, "Request rejected for a PMIPv6 reason "},
     {113, "APN Congestion"},
@@ -1646,8 +1667,10 @@ static const value_string gtpv2_cause_vals[] = {
     {125, "UE not authorised by OCS or external AAA Server"},
     {126, "Multiple accesses to a PDN connection not allowed"},
     {127, "Request rejected due to UE capability"},
+    {128, "S1-U Path Failure" },
+    {129, "5GC not allowed" },
 
-    /* 128-239 Spare. For future use in a triggered/response message  */
+    /* 130-239 Spare. For future use in a triggered/response message  */
     /* 240-255 Spare. For future use in an initial/request message */
     {0, NULL}
 };
@@ -1677,10 +1700,15 @@ dissect_gtpv2_cause(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, pro
     offset += 1;
 
     /* Octet 6 Spare PCE BCE CS */
-    proto_tree_add_bits_item(tree, hf_gtpv2_spare_bits, tvb, offset << 3, 5, ENC_BIG_ENDIAN);
-    proto_tree_add_item(tree, hf_gtpv2_cause_pce, tvb, offset, 1, ENC_BIG_ENDIAN);
-    proto_tree_add_item(tree, hf_gtpv2_cause_bce, tvb, offset, 1, ENC_BIG_ENDIAN);
-    proto_tree_add_item(tree, hf_gtpv2_cause_cs, tvb, offset,  1, ENC_BIG_ENDIAN);
+    static const int* oct6_flags[] = {
+        &hf_gtpv2_spare_b7_b3,
+        &hf_gtpv2_cause_pce,
+        &hf_gtpv2_cause_bce,
+        &hf_gtpv2_cause_cs,
+        NULL
+    };
+
+    proto_tree_add_bitmask_list(tree, tvb, offset, 1, oct6_flags, ENC_NA);
     offset += 1;
 
     /* If n = 2, a = 0 and the Cause IE shall be 6 octets long.
@@ -2434,6 +2462,23 @@ dissect_gtpv2_ind(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, proto_ite
         return;
     }
 
+    static const int* oct12_flags[] = {
+        &hf_gtpv2_spare_b7_b5,
+        &hf_gtpv2_n5gnmi,
+        &hf_gtpv2_5gcnrs,
+        &hf_gtpv2_5gcnri,
+        &hf_gtpv2_5srhoi,
+        &hf_gtpv2_ethpdn,
+        NULL
+    };
+    /*Octet 12 Spare ETHPDN */
+    proto_tree_add_bitmask_list(tree, tvb, offset, 1, oct12_flags, ENC_NA);
+    offset += 1;
+
+    if (length == 8) {
+        return;
+    }
+
     proto_tree_add_expert_format(tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, -1, "The rest of the IE not dissected yet");
 
 
@@ -2942,8 +2987,8 @@ decode_gtpv2_uli(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, proto_item
             return str;
     }
 
-    /* 8.21.8  Macro eNodeB ID field */
-    if (flags & GTPv2_ULI_MACRO_eNB_ID_MASK)
+    /* 8.21.8  Extended Macro eNodeB ID field */
+    if (flags & GTPv2_ULI_EXT_MACRO_eNB_ID_MASK)
     {
         proto_item_append_text(item, "Ext Macro eNodeB ID ");
         part_tree = proto_tree_add_subtree(tree, tvb, offset, 7,
@@ -3167,6 +3212,7 @@ static const value_string gtpv2_f_teid_interface_type_vals[] = {
     {37, "S2a PGW GTP-U interface"},
     {38, "S11 MME GTP-U interface"},
     {39, "S11 SGW GTP-U interface"},
+    {40, "N26 AMF GTP-C interface"},
     {0, NULL}
 };
 static value_string_ext gtpv2_f_teid_interface_type_vals_ext = VALUE_STRING_EXT_INIT(gtpv2_f_teid_interface_type_vals);
@@ -4319,7 +4365,7 @@ dissect_gtpv2_mm_context_utms_q(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tre
 {
     proto_tree *flag_tree;
     int         offset;
-    guint8      oct, drxi, nr_qui, uamb_ri, samb_ri, vdp_len, hbr_len;
+    guint8      oct, drxi, nr_qui, uamb_ri, samb_ri, vdp_len, hbr_len, ear_len;
 
     offset = 0;
     flag_tree = proto_tree_add_subtree(tree, tvb, offset, 3, ett_gtpv2_mm_context_flag, NULL, "MM Context flags");
@@ -4411,7 +4457,36 @@ dissect_gtpv2_mm_context_utms_q(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tre
         return;
     }
 
-    /* (s+3) to (n+4) These octet(s) is/are present only if explicitly specified */
+    /* s+3	IOV_updates counter */
+    if (offset < (gint)length) {
+        proto_tree_add_item(tree, hf_gtpv2_mm_context_iov_updates_counter, tvb, offset, 1, ENC_BIG_ENDIAN);
+        offset += 1;
+    } else {
+        return;
+    }
+    /* s+4	Length of Extended Access Restriction Data */
+    if (offset < (gint)length) {
+        ear_len = tvb_get_guint8(tvb, offset);
+        proto_tree_add_item(tree, hf_gtpv2_mm_context_ear_len, tvb, offset, 1, ENC_BIG_ENDIAN);
+        offset += 1;
+        static const int * ear_flags[] = {
+            &hf_gtpv2_mm_context_nrsrna,
+            NULL
+        };
+        proto_tree_add_bitmask_list(tree, tvb, offset, 1, ear_flags, ENC_BIG_ENDIAN);
+        offset += 1;
+        if (ear_len > 1) {
+            proto_tree_add_expert_format(flag_tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, -1, "The rest of the IE not dissected yet");
+            offset += ear_len - 1;
+        }
+    } else {
+        return;
+    }
+
+    if (offset == (gint)length) {
+        return;
+    }
+    /* ts+1) to (n+4) These octet(s) is/are present only if explicitly specified */
     proto_tree_add_expert_format(flag_tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, -1, "The rest of the IE not dissected yet");
 
 }
@@ -4427,7 +4502,7 @@ dissect_gtpv2_mm_context_eps_qq(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tre
     proto_tree *flag_tree, *qua_tree, *qui_tree, *sc_tree;
     gint        offset;
     guint8      tmp, nhi, drxi, nr_qua, nr_qui, uamb_ri, osci, samb_ri, vdp_len;
-    guint32     dword, paging_len, ue_add_sec_cap_len, bit_offset, ex_access_res_data_len, ue_nr_sec_cap_len, apn_rte_ctrl_sts_len;
+    guint32     dword, paging_len, ue_add_sec_cap_len, ex_access_res_data_len, ue_nr_sec_cap_len, apn_rte_ctrl_sts_len, ie_len;
 
     offset = 0;
 
@@ -4609,10 +4684,17 @@ dissect_gtpv2_mm_context_eps_qq(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tre
      *            spare               |    USSRNA | NRSRNA
      */
     if(ex_access_res_data_len > 0){
-        bit_offset = offset << 3;
-        proto_tree_add_bits_item(tree, hf_gtpv2_spare_bits, tvb, bit_offset, 6, ENC_BIG_ENDIAN);
-        proto_tree_add_item(tree, hf_gtpv2_mm_context_ussrna, tvb, offset, 1, ENC_BIG_ENDIAN);
-        proto_tree_add_item(tree, hf_gtpv2_mm_context_nrsrna, tvb, offset, 1, ENC_BIG_ENDIAN);
+        static const int* ear_flags[] = {
+            &hf_gtpv2_spare_b7_b5,
+            &hf_gtpv2_mm_context_nruna,
+            &hf_gtpv2_mm_context_nrusrna,
+            &hf_gtpv2_mm_context_nrna,
+            &hf_gtpv2_mm_context_ussrna,
+            &hf_gtpv2_mm_context_nrsrna,
+            NULL
+        };
+        proto_tree_add_bitmask_list(tree, tvb, offset, 1, ear_flags, ENC_BIG_ENDIAN);
+
         offset += 1;
     }
 
@@ -4652,6 +4734,11 @@ dissect_gtpv2_mm_context_eps_qq(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tre
         proto_tree_add_expert_format(sc_tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, ue_nr_sec_cap_len, "The rest of the IE not dissected yet");
         offset += ue_nr_sec_cap_len;
     }
+
+    if (offset == (gint)length) {
+        return;
+    }
+
     /* (y+1) to (y+2) Length of APN Rate Control Statuses */
     proto_tree_add_item_ret_uint(tree, hf_gtpv2_mm_context_apn_rte_ctrl_sts_len, tvb, offset, 1, ENC_BIG_ENDIAN, &apn_rte_ctrl_sts_len);
     offset += 1;
@@ -4660,6 +4747,35 @@ dissect_gtpv2_mm_context_eps_qq(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tre
         sc_tree = proto_tree_add_subtree(tree, tvb, offset, apn_rte_ctrl_sts_len, ett_gtpv2_apn_rte_ctrl_sts_len, NULL, "APN Rate Control Status");
         proto_tree_add_expert_format(sc_tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, apn_rte_ctrl_sts_len, "The rest of the IE not dissected yet");
         offset += apn_rte_ctrl_sts_len;
+    }
+    if (offset == (gint)length) {
+        return;
+    }
+
+    /* (l+1)  Length of Core Network Restrictions */
+    proto_tree_add_item_ret_uint(tree, hf_gtpv2_mm_context_cnr_len, tvb, offset, 1, ENC_BIG_ENDIAN, &ie_len);
+    offset += 1;
+    if (ie_len) {
+        /* (l+2) to (l+5)	Core Network Restrictions */
+        /* The Core Network Restrictions coding is specified in clause 7.2.230 of 3GPP TS 29.272 [70].
+           If Length of Core Network Restrictions is zero, then the field of Core Network Restrictions
+           in octets "(l+2) to (l+5)" shall not be present.
+         */
+        proto_tree_add_expert_format(tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, ie_len, "The rest of the IE not dissected yet");
+        offset += ie_len;
+    }
+
+    if (offset == (gint)length) {
+        return;
+    }
+
+    /* (l+6)  Length of UE Radio Capability ID hf_gtpv2_mm_context_ue_radio_cap_len*/
+    proto_tree_add_item_ret_uint(tree, hf_gtpv2_mm_context_ue_radio_cap_len, tvb, offset, 1, ENC_BIG_ENDIAN, &ie_len);
+    offset += 1;
+    if (ie_len) {
+        /* (l+7) to z UE Radio Capability ID */
+        proto_tree_add_expert_format(tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, ie_len, "The rest of the IE not dissected yet");
+        offset += ie_len;
     }
     if (offset < (gint)length){
         proto_tree_add_expert_format(tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, length - offset, "The rest of the IE not dissected yet");
@@ -5273,8 +5389,9 @@ dissect_gtpv2_gnodeb_id(tvbuff_t* tvb, packet_info* pinfo, proto_tree* tree, int
      */
 
     proto_tree_add_item(tree, hf_gtpv2_gnodeb_id_len, tvb, *offset, 1, ENC_BIG_ENDIAN);
+    *offset += 1;
 
-    proto_tree_add_item_ret_uint(tree, hf_gtpv2_godeb_id, tvb, *offset, 4, ENC_BIG_ENDIAN, &gnodeb_id);
+    proto_tree_add_item_ret_uint(tree, hf_gtpv2_gnodeb_id, tvb, *offset, 4, ENC_BIG_ENDIAN, &gnodeb_id);
     *offset += 4;
 
     str = wmem_strdup_printf(wmem_packet_scope(), "%s, gNodeB ID 0x%x",
@@ -6420,13 +6537,12 @@ dissect_gtpv2_apco(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, prot
 
 /* 8.95 Absolute Time of MBMS Data Transfer */
 static void
-dissect_gtpv2_abs_mbms_data_tf_time(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, proto_item *item _U_, guint16 length _U_, guint8 message_type _U_, guint8 instance _U_, session_args_t * args _U_)
+dissect_gtpv2_abs_mbms_data_tf_time(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, proto_item *item, guint16 length, guint8 message_type _U_, guint8 instance _U_, session_args_t * args _U_)
 {
     int          offset = 0;
-    const gchar *time_str;
+    char        *time_str;
 
-    time_str = tvb_ntp_fmt_ts(tvb, offset);
-    proto_tree_add_string(tree, hf_gtpv2_abs_time_mbms_data, tvb, offset, 8, time_str);
+    proto_tree_add_item_ret_time_string(tree, hf_gtpv2_abs_time_mbms_data, tvb, offset, 8, ENC_TIME_NTP | ENC_BIG_ENDIAN, wmem_packet_scope(), &time_str);
     proto_item_append_text(item, "%s", time_str);
 
     offset += 8;
@@ -6635,14 +6751,13 @@ dissect_gtpv2_twan_identifier(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree 
 static void
 dissect_gtpv2_uli_timestamp(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, proto_item *item _U_, guint16 length _U_, guint8 message_type _U_, guint8 instance _U_, session_args_t * args _U_)
 {
-    const gchar *time_str;
+    char *time_str;
 
     /* Octets 5 to 8 are encoded in the same format as the first four octets of the 64-bit timestamp
      * format as defined in section 6 of IETF RFC 5905
      */
 
-    time_str = tvb_ntp_fmt_ts_sec(tvb, 0);
-    proto_tree_add_string(tree, hf_gtpv2_uli_timestamp, tvb, 0, 4, time_str);
+    proto_tree_add_item_ret_time_string(tree, hf_gtpv2_uli_timestamp, tvb, 0, 4, ENC_TIME_NTP|ENC_BIG_ENDIAN, wmem_packet_scope(), &time_str);
     proto_item_append_text(item, "%s", time_str);
 
 }
@@ -7038,15 +7153,14 @@ dissect_gtpv2_pres_rep_area_information(tvbuff_t *tvb, packet_info *pinfo _U_, p
 static void
 dissect_gtpv2_twan_identifier_timestamp(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, proto_item *item _U_, guint16 length _U_, guint8 message_type _U_, guint8 instance _U_, session_args_t * args _U_)
 {
-    const gchar *time_str;
+    char *time_str;
 
     /* TWAN Identifier Timestamp value */
     /* Octets 5 to 8 are encoded in the same format as the first four octets of the 64-bit timestamp
     * format as defined in section 6 of IETF RFC 5905
     */
 
-    time_str = tvb_ntp_fmt_ts_sec(tvb, 0);
-    proto_tree_add_string(tree, hf_gtpv2_twan_id_ts, tvb, 0, 4, time_str);
+    proto_tree_add_item_ret_time_string(tree, hf_gtpv2_twan_id_ts, tvb, 0, 4, ENC_TIME_NTP | ENC_BIG_ENDIAN, wmem_packet_scope(), &time_str);
     proto_item_append_text(item, "%s", time_str);
 
 }
@@ -7239,6 +7353,33 @@ dissect_gtpv2_ms_ts(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, pro
 }
 
 /*
+ * 8.120        Monitoring Event Information
+ */
+static void
+dissect_gtpv2_mon_event_inf(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, proto_item *item _U_, guint16 length _U_, guint8 message_type _U_, guint8 instance _U_, session_args_t * args _U_)
+{
+    int   offset = 0;
+    guint32 scef_id_len;
+
+    /* Octet 5 to 8 SCEF Reference ID */
+    proto_tree_add_item(tree, hf_gtpv2_mon_event_inf_scef_reference_id, tvb, offset, 4, ENC_BIG_ENDIAN);
+    offset += 4;
+    /* Octet 9 Length of SCEF ID */
+    proto_tree_add_item_ret_uint(tree, hf_gtpv2_mon_event_inf_scef_id_length, tvb, offset, 1, ENC_BIG_ENDIAN, &scef_id_len);
+    offset++;
+    /* Octet 10 to k SCEF ID */
+    proto_tree_add_item(tree, hf_gtpv2_mon_event_inf_scef_id, tvb, offset, scef_id_len, ENC_UTF_8 | ENC_NA);
+    offset = offset + scef_id_len;
+    /* Octet (k+1) to (k+2) Remaining Number of Reports */
+    proto_tree_add_item(tree, hf_gtpv2_mon_event_inf_remaining_number_of_reports, tvb, offset, 2, ENC_BIG_ENDIAN );
+    offset += 2;
+
+    if(offset < length){
+        proto_tree_add_expert(tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, offset, length- offset);
+    }
+}
+
+/*
  * 8.125 CIoT Optimizations Support Indication
  */
 static void
@@ -7332,7 +7473,6 @@ dissect_gtpv2_serv_plmn_rate_control(tvbuff_t *tvb, packet_info *pinfo _U_, prot
 static void
 dissect_gtpv2_counter(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, proto_item *item _U_, guint16 length _U_, guint8 message_type _U_, guint8 instance _U_, session_args_t * args _U_)
 {
-    const gchar *time_str;
     int offset = 0;
 
     /* Timestamp value */
@@ -7340,8 +7480,7 @@ dissect_gtpv2_counter(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, p
      *format as defined in section 6 of IETF RFC 5905
      */
 
-    time_str = tvb_ntp_fmt_ts_sec(tvb, 0);
-    proto_tree_add_string(tree, hf_gtpv2_timestamp_value, tvb, offset, 4, time_str);
+    proto_tree_add_item(tree, hf_gtpv2_timestamp_value, tvb, offset, 4, ENC_TIME_NTP | ENC_BIG_ENDIAN);
     offset += 4;
     proto_tree_add_item(tree, hf_gtpv2_counter_value, tvb, offset, 1, ENC_BIG_ENDIAN);
 }
@@ -7372,7 +7511,6 @@ static void
 dissect_gtpv2_secondary_rat_usage_data_report(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, proto_item *item _U_, guint16 length, guint8 message_type _U_, guint8 instance _U_, session_args_t * args _U_)
 {
    int offset = 0;
-   const gchar *time_str;
    static const int *secondary_rat_usage_data_report_flags[] = {
        &hf_gtpv2_secondary_rat_usage_data_report_spare_bits,
        &hf_gtpv2_secondary_rat_usage_data_report_bit2,
@@ -7407,13 +7545,11 @@ dissect_gtpv2_secondary_rat_usage_data_report(tvbuff_t *tvb, packet_info *pinfo,
     */
 
     /* Octets 8 to 11 Start timestamp */
-    time_str = tvb_ntp_fmt_ts_sec(tvb, offset);
-    proto_tree_add_string(tree, hf_gtpv2_secondary_rat_usage_data_report_start_timestamp, tvb, offset, 4, time_str);
+    proto_tree_add_item(tree, hf_gtpv2_secondary_rat_usage_data_report_start_timestamp, tvb, offset, 4, ENC_TIME_NTP | ENC_BIG_ENDIAN);
     offset += 4;
 
     /* Octets 12 to 15 End timestamp */
-    time_str = tvb_ntp_fmt_ts_sec(tvb, offset);
-    proto_tree_add_string(tree, hf_gtpv2_secondary_rat_usage_data_report_end_timestamp, tvb, offset, 4, time_str);
+    proto_tree_add_item(tree, hf_gtpv2_secondary_rat_usage_data_report_end_timestamp, tvb, offset, 4, ENC_TIME_NTP | ENC_BIG_ENDIAN);
     offset += 4;
 
     /* 16 to 23 Usage Data DL */
@@ -7829,6 +7965,14 @@ dissect_gtpv2_ext_trs_inf(tvbuff_t* tvb, packet_info* pinfo _U_, proto_tree* tre
     }
 }
 
+/* 8.137 Monitoring Event Extension Information */
+static void
+dissect_gtpv2_ie_mon_event_ext_inf(tvbuff_t* tvb, packet_info* pinfo, proto_tree* tree, proto_item* item _U_, guint16 length, guint8 message_type _U_, guint8 instance _U_, session_args_t* args _U_)
+{
+    proto_tree_add_expert(tree, pinfo, &ei_gtpv2_ie_data_not_dissected, tvb, 0, length);
+}
+
+
 /* Table 8.1-1: Information Element types for GTPv2 */
 
 typedef struct _gtpv2_ie {
@@ -7973,8 +8117,8 @@ static const gtpv2_ie_t gtpv2_ies[] = {
 
     {GTPV2_IE_PAGING_AND_SERVICE_INF, dissect_gtpv2_paging_and_service_inf}, /* 186, 8.117 Paging and Service Information */
     {GTPV2_IE_INTEGER_NUMBER, dissect_gtpv2_integer_number},                 /* 187, 8.118 Integer Number */
-    { GTPV2_IE_MILLISECOND_TS, dissect_gtpv2_ms_ts },                        /* 188, 8.119 Millisecond Time Stamp */
-                                                                             /* 189, 8.120 Monitoring Event Information */
+    {GTPV2_IE_MILLISECOND_TS, dissect_gtpv2_ms_ts},                          /* 188, 8.119 Millisecond Time Stamp */
+    {GTPV2_IE_MON_EVENT_INF, dissect_gtpv2_mon_event_inf},                   /* 189, 8.120 Monitoring Event Information */
                                                                              /* 190, 8.121 ECGI List */
                                                                              /* 191, 8.122 Remote UE Context */
                                                                              /* 192, 8.123 Remote User ID */
@@ -7991,6 +8135,7 @@ static const gtpv2_ie_t gtpv2_ies[] = {
     {GTPV2_IE_MAX_PKT_LOSS_RTE, dissect_gtpv2_max_pkt_loss_rte },            /* 203, 8.134 Maximum Packet Loss Rate */
     {GTPV2_IE_APN_RTE_CNTRL_STATUS, dissect_gtpv2_apn_rte_cntrl_status },    /* 204, 8.135 APN Rate Control Status */
     {GTPV2_IE_EXT_TRS_INF, dissect_gtpv2_ext_trs_inf },                      /* 205, 8.136 Extended Trace Information */
+    {GTPV2_IE_MON_EVENT_EXT_INF, dissect_gtpv2_ie_mon_event_ext_inf },       /* 206, 8.136 Monitoring Event Extension Information */
 
     {GTPV2_IE_PRIVATE_EXT, dissect_gtpv2_private_ext},
 
@@ -8270,8 +8415,15 @@ dissect_gtpv2_ie_common(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, 
         /*Octet 2 - 3 */
         proto_tree_add_item(ie_tree, hf_gtpv2_ie_len, tvb, offset, 2, ENC_BIG_ENDIAN);
         offset += 2;
+
         /* CR Spare Instance Octet 4*/
         proto_tree_add_item(ie_tree, hf_gtpv2_cr, tvb, offset, 1, ENC_BIG_ENDIAN);
+
+        /* ch8.120 breaks the format described in ch8.2.1 */
+        if (type == GTPV2_IE_MON_EVENT_INF) {
+            proto_tree_add_item(ie_tree, hf_gtpv2_mon_event_inf_nsui, tvb, offset, 1, ENC_BIG_ENDIAN);
+            proto_tree_add_item(ie_tree, hf_gtpv2_mon_event_inf_nsur, tvb, offset, 1, ENC_BIG_ENDIAN);
+        }
 
         instance = tvb_get_guint8(tvb, offset) & 0x0f;
         proto_tree_add_item(ie_tree, hf_gtpv2_instance, tvb, offset, 1, ENC_BIG_ENDIAN);
@@ -8507,6 +8659,16 @@ void proto_register_gtpv2(void)
            FT_UINT8, BASE_DEC, NULL, 0x0,
            NULL, HFILL }
         },
+        { &hf_gtpv2_spare_b7_b3,
+          {"Spare bit(s)", "gtpv2.spare_b7_b3",
+           FT_UINT8, BASE_DEC, NULL, 0xf8,
+           NULL, HFILL }
+        },
+        //{ &hf_gtpv2_spare_b7_b1,
+        //  {"Spare bit(s)", "gtpv2.spare_b7_b3",
+        //   FT_UINT8, BASE_DEC, NULL, 0xfe,
+        //   NULL, HFILL }
+        //},
         { &hf_gtpv2_spare_bits,
           {"Spare bit(s)", "gtpv2.spare_bits",
            FT_UINT8, BASE_DEC, NULL, 0x0,
@@ -9004,6 +9166,26 @@ void proto_register_gtpv2(void)
         {&hf_gtpv2_tspcmi,
          {"TSPCMI (Triggering SGSN Initiated PDP Context Creation/Modification Indication)", "gtpv2.tspcmi",
           FT_BOOLEAN, 8, NULL, 0x01, NULL, HFILL}
+        },
+        {&hf_gtpv2_n5gnmi,
+        { "N5GNMI (No 5GS N26 Mobility Indication", "gtpv2.n5gnmi",
+         FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x10, NULL, HFILL }
+        },
+        { &hf_gtpv2_5gcnrs,
+        { "5GCNRS (5GC Not Restricted Support)", "gtpv2.5gcnrs",
+         FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x08, NULL, HFILL }
+        },
+        { &hf_gtpv2_5gcnri,
+        { "5GCNRI (5GC Not Restricted Indication)", "gtpv2.5gcnri",
+         FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x04, NULL, HFILL }
+        },
+        { &hf_gtpv2_5srhoi,
+        { "5SRHOI (5G-SRVCC HO Indication)", "gtpv2.5srhoi",
+         FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x02, NULL, HFILL }
+        },
+        { &hf_gtpv2_ethpdn,
+         {"ETHPDN (Ethernet PDN Support Indication)", "gtpv2.ethpdn",
+          FT_BOOLEAN, 8, TFS(&tfs_supported_not_supported), 0x01, NULL, HFILL}
         },
         { &hf_gtpv2_pdn_type,
           {"PDN Type", "gtpv2.pdn_type",
@@ -9996,6 +10178,16 @@ void proto_register_gtpv2(void)
             FT_UINT8, BASE_DEC, NULL, 0x0,
             NULL, HFILL }
         },
+        { &hf_gtpv2_mm_context_cnr_len,
+        { "Length of Core Network Restrictions", "gtpv2.mm_context.cnr_len",
+            FT_UINT8, BASE_DEC, NULL, 0x0,
+            NULL, HFILL }
+        },
+        { &hf_gtpv2_mm_context_ue_radio_cap_len,
+        { "Length of UE Radio Capability ID", "gtpv2.mm_context.radio_cap_len",
+            FT_UINT8, BASE_DEC, NULL, 0x0,
+            NULL, HFILL }
+        },
         { &hf_gtpv2_una,
           { "UTRAN", "gtpv2.mm_context.una",
             FT_BOOLEAN, 8, TFS(&tfs_not_allowed_allowed), 0x01,
@@ -10057,14 +10249,29 @@ void proto_register_gtpv2(void)
            FT_BOOLEAN, 8, NULL, 0x01,
            "Old Security Context Indicator", HFILL}
         },
+        { &hf_gtpv2_mm_context_nruna,
+        { "NRUNA (NR-U in 5GS Not Allowed)", "gtpv2.mm_context.nrusrna",
+            FT_BOOLEAN, 8, NULL, 0x10,
+            NULL, HFILL }
+        },
+        { &hf_gtpv2_mm_context_nrusrna,
+        { "NRUSRNA (New Radio Unlicensed as Secondary RAT Not Allowed)", "gtpv2.mm_context.nrusrna",
+            FT_BOOLEAN, 8, NULL, 0x08,
+            NULL, HFILL }
+        },
+        { &hf_gtpv2_mm_context_nrna,
+        { "NRNA(NR in 5GS Not Allowed)", "gtpv2.mm_context.nrna",
+            FT_BOOLEAN, 8, NULL, 0x04,
+            NULL, HFILL }
+        },
         { &hf_gtpv2_mm_context_ussrna,
           {"USSRNA", "gtpv2.mm_context_ussrna",
-           FT_UINT8, BASE_DEC, NULL, 0x02,
-           NULL, HFILL}
+           FT_BOOLEAN, 8, NULL, 0x02,
+           "Unlicensed Spectrum in the form of LAA or LWA/LWIP as Secondary RAT Not Allowed", HFILL}
         },
         { &hf_gtpv2_mm_context_nrsrna,
-          {"NRSRNA", "gtpv2.mm_context_nrsrna",
-           FT_UINT8, BASE_DEC, NULL, 0x01,
+          {"NRSRNA((NR as Secondary RAT Not Allowed)", "gtpv2.mm_context_nrsrna",
+           FT_BOOLEAN, 8, NULL, 0x01,
            NULL, HFILL}
         },
         { &hf_gtpv2_mm_context_samb_ri,
@@ -10409,12 +10616,12 @@ void proto_register_gtpv2(void)
         },
         { &hf_gtpv2_uli_timestamp,
         { "ULI Timestamp", "gtpv2.uli_timestamp",
-        FT_STRING, BASE_NONE, NULL, 0,
+            FT_ABSOLUTE_TIME, ABSOLUTE_TIME_NTP_UTC, NULL, 0,
         NULL, HFILL }
         },
         { &hf_gtpv2_abs_time_mbms_data,
         { "Absolute Time of MBMS Data Transfer", "gtpv2.abs_time_mbms_data",
-        FT_STRING, BASE_NONE, NULL, 0,
+        FT_ABSOLUTE_TIME, ABSOLUTE_TIME_NTP_UTC, NULL, 0,
         NULL, HFILL }
         },
         { &hf_gtpv2_mbms_session_duration_days,
@@ -10730,7 +10937,7 @@ void proto_register_gtpv2(void)
       { &hf_gtpv2_fq_csid_node_id, { "Node-ID", "gtpv2.fq_csid_node_id", FT_UINT32, BASE_DEC, NULL, 0x00000FFF, NULL, HFILL }},
       { &hf_gtpv2_fq_csid_mcc_mnc, { "MCC+MNC", "gtpv2.fq_csid_mcc_mnc", FT_UINT32, BASE_DEC, NULL, 0xFFFFF000, NULL, HFILL }},
 
-      { &hf_gtpv2_twan_id_ts, { "TWAN Identifier Timestamp", "gtpv2.twan.id_ts", FT_STRING, BASE_NONE, NULL, 0, NULL, HFILL } },
+      { &hf_gtpv2_twan_id_ts, { "TWAN Identifier Timestamp", "gtpv2.twan.id_ts", FT_ABSOLUTE_TIME, ABSOLUTE_TIME_NTP_UTC, NULL, 0, NULL, HFILL } },
       { &hf_gtpv2_twan_flags,{ "Flags", "gtpv2.twan_id.flags", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
       { &hf_gtpv2_twan_bssidi,{ "BSSIDI", "gtpv2.twan_id.bssidi", FT_BOOLEAN, 8, TFS(&tfs_present_not_present), 0x01, NULL, HFILL } },
       { &hf_gtpv2_twan_civai,{ "CIVAI", "gtpv2.twan_id.civai", FT_BOOLEAN, 8, TFS(&tfs_present_not_present), 0x02, NULL, HFILL } },
@@ -10814,6 +11021,36 @@ void proto_register_gtpv2(void)
           FT_ABSOLUTE_TIME, ABSOLUTE_TIME_UTC, NULL, 0x0,
           NULL, HFILL }
       },
+      { &hf_gtpv2_mon_event_inf_nsur,
+      { "NSUR (Notify SCEF when UE becomes Reachable)", "gtpv2.mon_event_inf.nsur",
+          FT_BOOLEAN, 8, TFS(&tfs_present_not_present), 0x10,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_mon_event_inf_nsui,
+      { "NSUI (Notify SCEF when UE becomes Idle)", "gtpv2.mon_event_inf.nsui",
+          FT_BOOLEAN, 8, TFS(&tfs_present_not_present), 0x20,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_mon_event_inf_scef_reference_id,
+          { "SCEF Reference ID", "gtpv2.mon_event_inf.scef_reference_id",
+          FT_UINT32, BASE_DEC, NULL, 0x0,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_mon_event_inf_scef_id_length,
+          { "SCEF ID length", "gtpv2.mon_event_inf.scef_id_length",
+          FT_UINT8, BASE_DEC, NULL, 0x0,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_mon_event_inf_scef_id,
+          { "SCEF ID", "gtpv2.mon_event_inf.scef_id",
+          FT_STRING, BASE_NONE, NULL, 0x0,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_mon_event_inf_remaining_number_of_reports,
+          { "Remaining Number of Reports", "gtpv2.mon_event_inf.remaining_number_of_reports",
+          FT_UINT16, BASE_DEC, NULL, 0x0,
+          NULL, HFILL }
+      },
       { &hf_gtpv2_rohc_profile_flags,
       { "ROHC Profiles flags", "gtpv2.rohc_profile_flags",
           FT_UINT8, BASE_HEX, NULL, 0x0,
@@ -10876,7 +11113,7 @@ void proto_register_gtpv2(void)
       },
       { &hf_gtpv2_timestamp_value,
       { "Timestamp value", "gtpv2.timestamp_value",
-          FT_STRING, BASE_NONE, NULL, 0x0,
+          FT_ABSOLUTE_TIME, ABSOLUTE_TIME_NTP_UTC, NULL, 0x0,
           NULL, HFILL }
       },
       { &hf_gtpv2_counter_value,
@@ -10921,12 +11158,12 @@ void proto_register_gtpv2(void)
       },
       { &hf_gtpv2_secondary_rat_usage_data_report_start_timestamp,
       { "Start timestamp", "gtpv2.secondary_rat_usage_data_report.start_timestamp",
-          FT_STRING, BASE_NONE, NULL, 0x0,
+          FT_ABSOLUTE_TIME, ABSOLUTE_TIME_NTP_UTC, NULL, 0x0,
           NULL, HFILL }
       },
       { &hf_gtpv2_secondary_rat_usage_data_report_end_timestamp,
       { "End timestamp", "gtpv2.secondary_rat_usage_data_report.end_timestamp",
-          FT_STRING, BASE_NONE, NULL, 0x0,
+          FT_ABSOLUTE_TIME, ABSOLUTE_TIME_NTP_UTC, NULL, 0x0,
           NULL, HFILL }
       },
       { &hf_gtpv2_secondary_rat_usage_data_report_usage_data_dl,
@@ -10959,8 +11196,8 @@ void proto_register_gtpv2(void)
           FT_UINT8, BASE_DEC, NULL, 0x3f,
           NULL, HFILL}
       },
-      { &hf_gtpv2_godeb_id,
-      { "gNodeB ID", "gtpv2.godeb_id",
+      { &hf_gtpv2_gnodeb_id,
+      { "gNodeB ID", "gtpv2.gnodeb_id",
           FT_UINT32, BASE_DEC, NULL, 0x0,
           NULL, HFILL }
       },
@@ -11522,6 +11759,21 @@ void proto_register_gtpv2(void)
       { &hf_gtpv2_spare_b7_b2,
       { "Spare", "gtpv2.spare.b7_b2",
           FT_UINT8, BASE_HEX, NULL, 0xfc,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_spare_b7_b5,
+      { "Spare", "gtpv2.spare.b7_b5",
+          FT_UINT8, BASE_HEX, NULL, 0xe0,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_mm_context_iov_updates_counter,
+      { "IOV_updates counter", "gtpv2.mm_context.iov_updates_counter",
+          FT_UINT8, BASE_DEC, NULL, 0x0,
+          NULL, HFILL }
+      },
+      { &hf_gtpv2_mm_context_ear_len,
+      { "Length of Extended Access Restriction Data", "gtpv2.mm_context.ear_len",
+          FT_UINT8, BASE_DEC, NULL, 0x0,
           NULL, HFILL }
       },
     };
